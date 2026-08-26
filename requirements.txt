@@ -1,0 +1,9 @@
+google-genai
+opencv-python
+pillow
+pydantic
+pydantic-settings
+fastapi
+uvicorn[standard]
+requests
+python-dotenv

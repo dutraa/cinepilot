@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CinePilot — Director's Monitor</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12161f;
+    --panel-edge: #1d2433;
+    --text: #e8ecf4;
+    --text-dim: #8a93a6;
+    --accent: #4fc3f7;
+    --green: #2ecc71;
+    --yellow: #f1c40f;
+    --red: #e74c3c;
+    --gray: #5c6577;
+    --orange: #f39c12;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 700px at 20% -10%, #131a2a 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    padding: 18px 22px 26px;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--panel-edge);
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .logo {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  .logo span { color: var(--accent); }
+  .tagline {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .header-right { margin-left: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    color: var(--text-dim);
+    transition: all 0.3s ease;
+  }
+  .pill .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--gray);
+  }
+  .pill.on { color: var(--green); border-color: rgba(46, 204, 113, 0.5); }
+  .pill.on .dot {
+    background: var(--green);
+    box-shadow: 0 0 10px 2px rgba(46, 204, 113, 0.6);
+    animation: pulse 2s infinite;
+  }
+  .pill.warn { color: var(--yellow); border-color: rgba(241, 196, 15, 0.4); }
+  .pill.warn .dot { background: var(--yellow); box-shadow: 0 0 8px 1px rgba(241, 196, 15, 0.5); }
+  .pill.off { color: var(--red); border-color: rgba(231, 76, 60, 0.4); }
+  .pill.off .dot { background: var(--red); box-shadow: 0 0 8px 1px rgba(231, 76, 60, 0.5); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  #muteBtn {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--panel-edge);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  #muteBtn:hover { border-color: var(--accent); color: var(--accent); }
+  #muteBtn.muted { color: var(--red); border-color: rgba(231, 76, 60, 0.5); }
+
+  /* ---------- Layout ---------- */
+  .main-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+    gap: 18px;
+  }
+  @media (max-width: 980px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .panel-title {
+    padding: 12px 16px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--panel-edge);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-title .rec {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 10px 2px rgba(231, 76, 60, 0.7);
+    animation: pulse 1.4s infinite;
+  }
+
+  /* ---------- Video monitor ---------- */
+  .monitor-wrap { position: relative; background: #000; }
+  .monitor-wrap img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+    background: #000;
+  }
+  .hud {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+  .hud .grid-line { position: absolute; background: rgba(255, 255, 255, 0.12); }
+  .hud .v1 { left: 33.33%; top: 0; bottom: 0; width: 1px; }
+  .hud .v2 { left: 66.66%; top: 0; bottom: 0; width: 1px; }
+  .hud .h1 { top: 33.33%; left: 0; right: 0; height: 1px; }
+  .hud .h2 { top: 66.66%; left: 0; right: 0; height: 1px; }
+  .hud .corner {
+    position: absolute;
+    width: 26px; height: 26px;
+    border: 2px solid rgba(79, 195, 247, 0.55);
+  }
+  .hud .tl { top: 10px; left: 10px; border-right: none; border-bottom: none; }
+  .hud .tr { top: 10px; right: 10px; border-left: none; border-bottom: none; }
+  .hud .bl { bottom: 10px; left: 10px; border-right: none; border-top: none; }
+  .hud .br { bottom: 10px; right: 10px; border-left: none; border-top: none; }
+  .telemetry {
+    position: absolute;
+    bottom: 12px; left: 14px;
+    display: flex; gap: 16px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 0.75rem;
+    color: rgba(79, 195, 247, 0.95);
+    background: rgba(0, 0, 0, 0.45);
+    padding: 6px 12px;
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+  }
+
+  /* ---------- Shot list ---------- */
+  .shot-list { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .shot {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--panel-edge);
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.3s ease;
+  }
+  .shot-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .shot-name { font-weight: 600; font-size: 0.92rem; }
+  .badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge.PENDING { background: rgba(92, 101, 119, 0.22); color: #aab2c4; border: 1px solid rgba(92, 101, 119, 0.6); }
+  .badge.IN_PROGRESS { background: rgba(241, 196, 15, 0.14); color: var(--yellow); border: 1px solid rgba(241, 196, 15, 0.55); }
+  .badge.COMPLETED { background: rgba(46, 204, 113, 0.14); color: var(--green); border: 1px solid rgba(46, 204, 113, 0.55); }
+  .badge.REJECTED { background: rgba(231, 76, 60, 0.14); color: var(--red); border: 1px solid rgba(231, 76, 60, 0.55); }
+  .shot.IN_PROGRESS { border-color: rgba(241, 196, 15, 0.45); }
+  .shot.COMPLETED { border-color: rgba(46, 204, 113, 0.45); }
+  .shot.REJECTED { border-color: rgba(231, 76, 60, 0.45); }
+  .shot-feedback {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    line-height: 1.45;
+  }
+
+  /* ---------- Guidance banner ---------- */
+  .guidance {
+    margin-top: 18px;
+    border-radius: 12px;
+    border: 2px solid var(--panel-edge);
+    background: var(--panel);
+    padding: 18px 22px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  .guidance.INFO { border-color: rgba(79, 195, 247, 0.5); }
+  .guidance.WARNING {
+    border-color: var(--orange);
+    box-shadow: 0 0 22px rgba(243, 156, 18, 0.25);
+  }
+  .guidance.URGENT {
+    border-color: var(--red);
+    box-shadow: 0 0 26px rgba(231, 76, 60, 0.4);
+    animation: urgentFlash 1.1s infinite;
+  }
+  @keyframes urgentFlash {
+    0%, 100% { box-shadow: 0 0 26px rgba(231, 76, 60, 0.45); }
+    50% { box-shadow: 0 0 8px rgba(231, 76, 60, 0.15); }
+  }
+  .guidance-icon { font-size: 1.8rem; }
+  .guidance-body { flex: 1; min-width: 0; }
+  .guidance-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  #guidanceText { font-size: 1.15rem; font-weight: 600; line-height: 1.4; }
+  #guidanceTime {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-family: "Cascadia Code", "Consolas", monospace;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">CINE<span>PILOT</span></div>
+    <div class="tagline">Director's Monitor · Production Backlot</div>
+  </div>
+  <div class="header-right">
+    <div id="geminiPill" class="pill warn"><span class="dot"></span><span id="geminiPillText">Gemini: Connecting</span></div>
+    <div id="grafanaPill" class="pill warn"><span class="dot"></span><span id="grafanaPillText">Grafana: Dry Run</span></div>
+    <button id="muteBtn">🔊 Mute Audio Guidance</button>
+  </div>
+</header>
+
+<div class="main-grid">
+  <!-- Live monitor -->
+  <div class="panel">
+    <div class="panel-title"><span class="rec"></span> Live Aerial Monitor</div>
+    <div class="monitor-wrap">
+      <img src="/video_feed" alt="Live drone feed" />
+      <div class="hud">
+        <div class="grid-line v1"></div>
+        <div class="grid-line v2"></div>
+        <div class="grid-line h1"></div>
+        <div class="grid-line h2"></div>
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+      </div>
+      <div class="telemetry">
+        <span>FPS <b id="fpsVal">0.0</b></span>
+        <span>LATENCY <b id="latencyVal">0</b> ms</span>
+        <span>FRAMES <b id="framesVal">0</b></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shot list -->
+  <div class="panel">
+    <div class="panel-title">ER2 Shot List</div>
+    <div class="shot-list" id="shotList">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- Guidance banner -->
+<div id="guidanceCard" class="guidance INFO">
+  <div class="guidance-icon" id="guidanceIcon">🎬</div>
+  <div class="guidance-body">
+    <div class="guidance-label">Live Director Guidance — <span id="guidancePriority">INFO</span></div>
+    <div id="guidanceText">Standing by for the live feed.</div>
+  </div>
+  <div id="guidanceTime"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const SHOT_ORDER = [
+    "establishing_wide",
+    "topdown_property",
+    "orbit_pass",
+    "low_reveal",
+    "pull_away"
+  ];
+
+  const PRIORITY_ICONS = { INFO: "🎬", WARNING: "⚠️", URGENT: "🚨" };
+
+  let muted = false;
+  let lastSpokenTimestamp = null;
+
+  const muteBtn = document.getElementById("muteBtn");
+  muteBtn.addEventListener("click", function () {
+    muted = !muted;
+    muteBtn.classList.toggle("muted", muted);
+    muteBtn.textContent = muted ? "🔇 Unmute Audio Guidance" : "🔊 Mute Audio Guidance";
+    if (muted && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  });
+
+  function speak(text, priority) {
+    if (muted || !window.speechSynthesis || !text) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = priority === "URGENT" ? 1.15 : 1.0;
+    utterance.pitch = priority === "URGENT" ? 1.1 : 1.0;
+    utterance.volume = 1.0;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function renderShots(shots) {
+    const list = document.getElementById("shotList");
+    list.innerHTML = "";
+    SHOT_ORDER.forEach(function (id) {
+      const shot = shots[id];
+      if (!shot) return;
+      const card = document.createElement("div");
+      card.className = "shot " + shot.status;
+      card.innerHTML =
+        '<div class="shot-head">' +
+          '<div class="shot-name"></div>' +
+          '<div class="badge ' + shot.status + '">' + shot.status.replace("_", " ") + "</div>" +
+        "</div>" +
+        '<div class="shot-feedback"></div>';
+      card.querySelector(".shot-name").textContent = shot.title;
+      card.querySelector(".shot-feedback").textContent = shot.feedback || "";
+      list.appendChild(card);
+    });
+  }
+
+  function renderGuidance(guidance) {
+    const card = document.getElementById("guidanceCard");
+    card.className = "guidance " + (guidance.priority || "INFO");
+    document.getElementById("guidanceIcon").textContent =
+      PRIORITY_ICONS[guidance.priority] || "🎬";
+    document.getElementById("guidancePriority").textContent = guidance.priority || "INFO";
+    document.getElementById("guidanceText").textContent = guidance.instruction || "";
+    document.getElementById("guidanceTime").textContent = guidance.timestamp
+      ? new Date(guidance.timestamp).toLocaleTimeString()
+      : "";
+
+    if (guidance.timestamp && guidance.timestamp !== lastSpokenTimestamp) {
+      // Never speak the initial placeholder (empty timestamp) or repeats.
+      if (lastSpokenTimestamp !== null || guidance.timestamp) {
+        speak(guidance.instruction, guidance.priority);
+      }
+      lastSpokenTimestamp = guidance.timestamp;
+    }
+  }
+
+  function renderMetrics(metrics) {
+    document.getElementById("fpsVal").textContent = Number(metrics.fps).toFixed(1);
+    document.getElementById("latencyVal").textContent = Math.round(metrics.latency_ms);
+    document.getElementById("framesVal").textContent = metrics.frames_sent;
+
+    const geminiPill = document.getElementById("geminiPill");
+    const geminiText = document.getElementById("geminiPillText");
+    geminiText.textContent = "Gemini: " + metrics.gemini_status;
+    geminiPill.classList.remove("on", "warn", "off");
+    if (metrics.gemini_status === "Connected") geminiPill.classList.add("on");
+    else if (metrics.gemini_status === "Connecting") geminiPill.classList.add("warn");
+    else geminiPill.classList.add("off");
+
+    const grafanaPill = document.getElementById("grafanaPill");
+    const grafanaText = document.getElementById("grafanaPillText");
+    grafanaText.textContent = "Grafana: " + metrics.grafana_status;
+    grafanaPill.classList.remove("on", "warn", "off");
+    if (metrics.grafana_status === "Live") grafanaPill.classList.add("on");
+    else grafanaPill.classList.add("warn");
+  }
+
+  function connectEvents() {
+    const source = new EventSource("/events");
+    source.onmessage = function (event) {
+      try {
+        const state = JSON.parse(event.data);
+        renderShots(state.shots || {});
+        renderGuidance(state.latest_guidance || {});
+        renderMetrics(state.metrics || {});
+      } catch (err) {
+        console.error("Bad SSE payload", err);
+      }
+    };
+    source.onerror = function () {
+      // EventSource auto-reconnects; reflect the outage on the Gemini pill.
+      const geminiPill = document.getElementById("geminiPill");
+      geminiPill.classList.remove("on", "warn");
+      geminiPill.classList.add("off");
+      document.getElementById("geminiPillText").textContent = "Gemini: Disconnected";
+    };
+  }
+
+  connectEvents();
+})();
+</script>
+
+</body>
+</html>
