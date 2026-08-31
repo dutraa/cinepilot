@@ -119,3 +119,27 @@ GitHub: https://github.com/dutraa/cinepilot/issues/7
 **Files:** `README.md`, `.env.example`, `.gitignore`, `requirements-dev.txt`, `docs/demo-script.md`
 
 **Dependencies:** Issues 1–6
+
+## Issue 8: Build the story-aware next-shot mock demo
+
+GitHub: https://github.com/dutraa/cinepilot/issues/8
+
+**Goal:** Connect a mock story and ordered story beats to the live/synthetic shot so CinePilot recommends the next useful shot needed to advance the story.
+
+**Acceptance criteria:**
+
+- A seeded mock story loads without external hardware.
+- The dashboard shows the active beat, covered beats, and the current shot's story contribution.
+- The system publishes two or three strict `ShotRecommendation` records with story purpose, visual objective, why now, manual execution guidance, and safety notes.
+- The creator can select, complete, or dismiss a recommendation idempotently.
+- Coverage state changes are visible through `/api/state` and `/events`.
+- Gemini context includes story, active beat, coverage history, and current intent.
+- Deterministic fixture mode makes the demo repeatable without a Gemini key.
+- Tests cover contracts, state transitions, APIs, and dashboard rendering.
+- Demo and evaluation docs distinguish implemented behavior from planned behavior.
+
+**Files:** `schemas.py`, `state.py`, `tools.py`, `director_agent.py`, `server.py`, `templates/index.html`, `tests/`, `docs/SPEC.md`, `docs/architecture.md`, `docs/demo-script.md`, `docs/eval-protocol.md`
+
+**Dependencies:** Issues 1–7
+
+**Out of scope:** autonomous flight, screenplay parsing, multi-agent orchestration, editing, persistence, and production deployment.

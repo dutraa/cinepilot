@@ -1,12 +1,12 @@
 # CinePilot
 
-**An Agentic Aerial Cinematography Director**
+**An Advisory AI Cinematic Decision Engine**
 
-CinePilot connects a live drone video feed to the Google Gemini Live API and turns it into an advisory AI film director. Gemini watches footage in real time, compares it with a creator-provided shot intent, returns one to three structured cinematic tweaks, maintains the existing shot-list context, and can speak concise manual flight cues in the Director's Monitor dashboard.
+CinePilot connects live, prerecorded, or synthetic footage to the Google Gemini Live API and turns it into an advisory cinematic decision engine. Gemini watches footage in real time, compares it with a creator-provided story or shot intent, returns one to three structured cinematic tweaks, and can recommend what shot should be captured next to advance the story. The creator remains in control of approval and flight.
 
 ## Cinematic Tweak Engine
 
-The product loop is:
+The current product loop is:
 
 ```text
 Set shot intent -> watch the shot -> diagnose the highest-impact problem
@@ -15,6 +15,16 @@ Set shot intent -> watch the shot -> diagnose the highest-impact problem
 ```
 
 The critique is the canonical product output. A critique contains a summary and up to three tweaks, each with a category, diagnosis, recommendation, rationale, priority, and optional spoken cue. The system is advisory: it does not control the drone or edit footage automatically.
+
+The next demo extends this into a story-aware coverage loop:
+
+```text
+load mock story -> watch current shot -> identify current beat and missing coverage
+-> recommend two or three next shots -> creator selects one -> capture manually
+-> mark coverage complete -> evaluate the next result
+```
+
+The seeded story and exact walkthrough are in `docs/demo-script.md`. The story-aware contracts are planned, not yet implemented; do not describe them as shipped functionality until the corresponding issue is complete.
 
 The current implementation is intentionally local and session-scoped. It writes critique and creator-action events to an append-only JSONL log for demo evidence and can optionally publish tool calls and telemetry to Grafana Loki.
 
@@ -53,6 +63,8 @@ flowchart LR
 - **Right panel** — the ER2 shot list with color-coded status badges and the director's latest feedback per shot.
 - **Bottom banner** — the most recent guidance cue; `WARNING` and `URGENT` cues glow and pulse for visibility.
 - **Header** — glowing status pills for Gemini (Connected / Connecting / Disconnected) and Grafana (Live / Dry Run), plus a mute toggle for audio guidance.
+
+The story-aware dashboard will add a coverage panel that answers: what beat are we in, what did the current shot prove, what is missing, and which next shot can advance the story. This is the intended next slice, not a claim about the current UI.
 
 ## Quick Start
 
@@ -164,7 +176,9 @@ cinepilot/
 ├── config.py             # pydantic-settings configuration
 ├── templates/
 │   └── index.html        # Dark-mode Director's Monitor dashboard
-├── docs/                 # Evidence frame, architecture, evaluation, demo, and issues
+├── AGENTS.md             # Operating contract for coding agents
+├── everythings.md        # Compact source-of-truth project map
+├── docs/                 # Evidence frame, spec, architecture, decisions, evaluation, demo, issues
 ├── fixtures/             # Held-out evaluation manifest template
 ├── requirements.txt
 └── .env.example

@@ -55,3 +55,11 @@ The clip set must be held out from prompt examples. Every eligible attempt, incl
 The first release can support: “CinePilot produces a structured cinematic critique in a live multimodal workflow and warrants a pilot evaluation.”
 
 It cannot support: “CinePilot improves production outcomes,” “reduces retakes,” or “replaces a cinematographer” without a measured comparator and a real creator baseline.
+
+## Story-aware demo extension
+
+The next decision is whether the story-aware mock demo is worth advancing to a creator pilot. Its decision question is:
+
+> Given a story brief and current footage, can a creator select a technically plausible next shot that advances missing story coverage?
+
+The demo may show a seeded story and synthetic footage for repeatability. It may not present synthetic recommendations as proof of live-drone performance. The minimum comparator is a timed manual next-shot workflow on the same held-out cases, completed before the demo date. Supporting rows are time to first recommendation, valid recommendation rate, independent usefulness, creator selection rate, and completion rate; each must carry numerator, denominator, and `n`.

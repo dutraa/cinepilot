@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-CinePilot watches a live or prerecorded video source against a creator-provided shot intent. Gemini returns one to three prioritized cinematic tweaks. The creator decides whether each tweak is accepted, acted, or dismissed.
+CinePilot watches a live or prerecorded video source against a creator-provided story and shot intent. Gemini returns one to three prioritized cinematic tweaks for the current shot and, in the planned next slice, recommendations for missing story coverage. The creator decides whether a recommendation is selected, acted, completed, or dismissed.
 
 The system is advisory. It does not control a drone, edit footage, or claim that a recommendation was executed unless the creator marks it acted.
 
@@ -26,7 +26,7 @@ VideoStreamManager
   -> AppState publication and deduplication
   -> EventLog / Grafana
   -> SSE and /api/state
-  -> critique UI
+  -> critique and coverage UI
 ```
 
 Intent flows in the opposite direction:
@@ -47,6 +47,8 @@ Intent form
 
 Server-owned critique fields are critique ID, tweak ID, observation ID, timestamp, prompt version, and intent version.
 
+The next story-aware slice adds `StoryBrief`, `StoryBeat`, and `ShotRecommendation`. A recommendation must include the story purpose, visual objective, why-now explanation, manual execution guidance, and safety notes. Story and recommendation status are server-owned. See `docs/SPEC.md` for the reference contract and `docs/decisions/ADR-001-story-aware-demo-boundary.md` for the boundary decision.
+
 ## Failure behavior
 
 - Gemini disconnect: preserve the current intent and resend it after reconnect.
@@ -61,3 +63,5 @@ Server-owned critique fields are critique ID, tweak ID, observation ID, timestam
 ## Deliberate simplifications
 
 State is session-local and history is capped. The JSONL event log is sufficient for the first evidence run; a database is deferred until multiple users or persistent projects exist.
+
+The first story demo uses one `DirectorAgent`, one seeded story, three to five beats, and manual creator selection. Specialist agents, autonomous flight, screenplay parsing, and editing integrations remain out of scope until recommendation usefulness is evidenced.
