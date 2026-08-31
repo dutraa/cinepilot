@@ -193,7 +193,7 @@ Supporting metrics include first recommendation latency, valid recommendation ra
 
 ## 11. Issue sequence
 
-Issues 1–7 cover the existing cinematic critique engine and hardening. The next slice is:
+Issues 1–7 cover the existing cinematic critique engine and hardening. The next slice is the local parent Issue 8, broken into implementation sub-issues in `docs/issues.md`:
 
 ### Issue 8 — Build the story-aware next-shot mock demo
 
@@ -215,6 +215,8 @@ Acceptance criteria:
 - Tests cover validation, state transitions, API responses, and dashboard rendering.
 
 Dependencies: Issues 1–7; in particular, retain the existing evidence and provenance rules.
+
+Detailed execution order: `8.1 → 8.2 → 8.3 → 8.4 → 8.6 → 8.5 → 8.7 → 8.8`. The deterministic synthetic path is the cut line; Gemini integration must not block a repeatable demo.
 
 Likely files: `schemas.py`, `state.py`, `tools.py`, `director_agent.py`, `server.py`, `templates/index.html`, `tests/`, `docs/architecture.md`, `docs/demo-script.md`, `docs/eval-protocol.md`.
 
