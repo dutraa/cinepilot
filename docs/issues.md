@@ -124,9 +124,9 @@ GitHub: https://github.com/dutraa/cinepilot/issues/7
 
 This is a repository planning issue. `docs/issues.md` is the canonical issue tracker; do not create a separate GitHub issue unless explicitly requested.
 
-**Goal:** Connect one seeded mock story and ordered story beats to the live or synthetic shot so CinePilot explains the current shot's story contribution, identifies missing coverage, and recommends the next useful shots for the creator to capture manually.
+**Goal:** Help creators turn “this feels flat,” “make it more cinematic,” or “the shot is not working” into a specific, story-aware decision. Connect one seeded mock story and ordered story beats to the live or synthetic shot so CinePilot explains the current shot's story contribution, identifies missing coverage, and recommends the next useful shots for the creator to capture manually.
 
-**Vertical-slice definition:** A director can load “The place worth coming back to,” see the active beat, view a synthetic or live shot, receive two or three recommendations, select one, mark it completed, and see the coverage state advance. The same state is visible in the dashboard, `/api/state`, `/events`, and the local event log.
+**Vertical-slice definition:** A director can load “The place worth coming back to,” see the active beat, view a synthetic or live shot, receive two or three recommendations, select one, mark it completed, and see the coverage state advance. The same state is visible in the dashboard, `/api/state`, `/events`, and the local event log. Each recommendation connects a visible or story-level problem to a concrete change and explains why that change serves the intended result.
 
 **Parent dependencies:** Issues 1–7. Existing critique, intent, event-log, API, SSE, and dashboard behavior must remain working.
 
@@ -135,7 +135,7 @@ This is a repository planning issue. `docs/issues.md` is the canonical issue tra
 - A seeded mock story loads without external hardware or a Gemini key.
 - The dashboard shows the story, ordered beats, active beat, covered beats, missing coverage, and the current shot's story contribution.
 - The system publishes two or three strict `ShotRecommendation` records.
-- Every recommendation contains story purpose, visual objective, why now, manual execution guidance, safety notes, priority, and optional confidence.
+- Every recommendation contains story purpose, visual objective, why now, manual execution guidance, safety notes, priority, and optional confidence; supported categories include composition, camera angle and movement, lens feel, lighting, pacing, subject placement, continuity issues, and expression.
 - Server-owned IDs, timestamps, versions, and statuses cannot be supplied by Gemini or the browser.
 - The creator can select, complete, or dismiss a recommendation idempotently.
 - Coverage state changes are visible through `/api/state` and `/events` and are recorded in JSONL evidence.
@@ -160,6 +160,7 @@ This is a repository planning issue. `docs/issues.md` is the canonical issue tra
 - Define which initial synthetic shot covers Isolation and which beats remain missing.
 - Define two or three expected recommendation archetypes for the fixture, without copying the exact evaluation wording into the Gemini prompt.
 - Freeze an independent review rubric for story advancement, specificity, technical plausibility, and usefulness.
+- Keep the fixture narrative separate from the broader product hypothesis: uploaded footage, generated video, phones, webcams, and other cameras are future input paths, not part of this slice.
 
 **Acceptance criteria:**
 
@@ -212,6 +213,7 @@ ShotRecommendation
 - Reject unknown fields and invalid enum values.
 - Keep model input separate from server-owned output models.
 - Do not allow recommendations to contain autonomous control verbs as executable commands; they are manual guidance only.
+- Require enough context for the recommendation loop: watch the shot, understand intent, identify what is wrong or missing, recommend the highest-impact tweak or next shot, optionally apply it, and evaluate the result again.
 
 **Acceptance criteria:** Every field has a validation test, server-owned fields cannot be injected, two or three recommendations are valid, zero or four recommendations are rejected, and malformed model output cannot mutate state.
 
@@ -279,7 +281,7 @@ recommendation: selected -> dismissed
 
 ### Issue 8.5: Integrate recommendations into tools and Gemini context
 
-**Goal:** Give Gemini enough narrative and coverage context to recommend story-relevant next shots.
+**Goal:** Give Gemini enough narrative and coverage context to replace vague cinematic feedback with story-relevant next-shot recommendations and concrete current-shot tweaks.
 
 **Files:** `tools.py`, `director_agent.py`, `director_prompt.py`, `tests/test_tools.py`, `tests/test_director_agent.py`
 
@@ -292,6 +294,7 @@ recommendation: selected -> dismissed
 - Synchronize story context once per story/beat/coverage version, just as intent is synchronized once per intent version.
 - Keep the current `publish_cinematic_critique`, `update_shot_list`, and `speak_director_guidance` tools working.
 - Treat safety notes as advisory warnings and never expose them as control APIs.
+- Preserve the option to evaluate the next result after the creator applies a recommendation; publication is not proof that the shot improved.
 
 **Acceptance criteria:** Context is sent on connect and only when its version changes; valid recommendations publish; invalid recommendations are rejected without killing the session; duplicate recommendations are suppressed; provenance is recorded.
 
@@ -355,7 +358,7 @@ recommendation: selected -> dismissed
 
 ### Issue 8.8: Integrate, verify, and run the evidence gate
 
-**Goal:** Prove the slice is repeatable and state the strongest claim the evidence supports.
+**Goal:** Prove the slice is repeatable and state the strongest claim the evidence supports about reducing ambiguity in cinematic decisions. Do not claim fewer retakes, better shots, faster production, or replacement of expert crew without comparator evidence.
 
 **Files:** `tests/`, `docs/demo-script.md`, `docs/eval-protocol.md`, `docs/evidence-frame.md`, `README.md`, `docs/SPEC.md`
 
