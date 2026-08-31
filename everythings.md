@@ -197,7 +197,7 @@ Issues 1–7 cover the existing cinematic critique engine and hardening. The nex
 
 ### Issue 8 — Build the story-aware next-shot mock demo
 
-GitHub: https://github.com/dutraa/cinepilot/issues/8
+Canonical issue record: `docs/issues.md`.
 
 Goal: Turn the current critique dashboard into a focused story-coverage demo for one seeded story.
 

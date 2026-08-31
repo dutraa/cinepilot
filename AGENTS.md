@@ -85,6 +85,7 @@ docs/issues.md            issue-sized implementation slices
 8. Make state transitions idempotent where a browser retry is expected.
 9. Keep state session-local until persistence is justified by evidence from multiple runs or users.
 10. Do not hide source provenance. The dashboard must show synthetic, file, webcam, RTSP, or RTMP.
+11. Track implementation issues in `docs/issues.md`. Do not create GitHub issues unless the user explicitly requests it.
 
 ## UI quality bar
 

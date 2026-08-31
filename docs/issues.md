@@ -122,7 +122,7 @@ GitHub: https://github.com/dutraa/cinepilot/issues/7
 
 ## Issue 8: Build the story-aware next-shot mock demo
 
-GitHub: https://github.com/dutraa/cinepilot/issues/8
+This is a repository planning issue. The canonical issue record is this file; do not create a separate GitHub issue unless explicitly requested.
 
 **Goal:** Connect a mock story and ordered story beats to the live/synthetic shot so CinePilot recommends the next useful shot needed to advance the story.
 
