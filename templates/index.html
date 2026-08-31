@@ -103,6 +103,7 @@
     gap: 18px;
   }
   @media (max-width: 980px) { .main-grid { grid-template-columns: 1fr; } }
+  .right-stack { display: grid; gap: 18px; align-content: start; }
 
   .panel {
     background: var(--panel);
@@ -245,6 +246,30 @@
     font-family: "Cascadia Code", "Consolas", monospace;
     white-space: nowrap;
   }
+  .intent-form { padding: 14px; display: grid; gap: 10px; }
+  .intent-form label { color: var(--text-dim); font-size: 0.7rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+  .intent-form input, .intent-form textarea {
+    width: 100%; background: #0d1119; color: var(--text); border: 1px solid var(--panel-edge);
+    border-radius: 7px; padding: 8px 10px; font: inherit; font-size: 0.82rem; resize: vertical;
+  }
+  .intent-form input:focus, .intent-form textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .intent-form button, .tweak-actions button {
+    background: var(--accent); color: #071018; border: none; border-radius: 7px; padding: 9px 12px;
+    font-weight: 700; cursor: pointer;
+  }
+  .intent-status { color: var(--text-dim); font-size: 0.75rem; min-height: 1em; }
+  .critique { padding: 14px; }
+  .critique-empty { color: var(--text-dim); font-size: 0.82rem; line-height: 1.5; }
+  .critique-summary { font-size: 0.95rem; line-height: 1.45; margin-bottom: 10px; }
+  .tweak-card { border: 1px solid var(--panel-edge); border-radius: 9px; padding: 11px; margin-top: 9px; background: rgba(255,255,255,0.025); }
+  .tweak-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.7px; }
+  .tweak-diagnosis { margin-top: 8px; color: var(--text-dim); font-size: 0.78rem; line-height: 1.4; }
+  .tweak-recommendation { margin-top: 7px; font-size: 0.86rem; line-height: 1.4; }
+  .tweak-rationale { margin-top: 5px; color: var(--text-dim); font-size: 0.76rem; line-height: 1.4; }
+  .tweak-actions { display: flex; gap: 6px; margin-top: 9px; }
+  .tweak-actions button { padding: 6px 8px; font-size: 0.7rem; }
+  .tweak-actions button.secondary { background: transparent; color: var(--text-dim); border: 1px solid var(--panel-edge); }
+  .intent-summary { padding: 0 14px 12px; color: var(--text-dim); font-size: 0.8rem; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -257,7 +282,8 @@
   <div class="header-right">
     <div id="geminiPill" class="pill warn"><span class="dot"></span><span id="geminiPillText">Gemini: Connecting</span></div>
     <div id="grafanaPill" class="pill warn"><span class="dot"></span><span id="grafanaPillText">Grafana: Dry Run</span></div>
-    <button id="muteBtn">🔊 Mute Audio Guidance</button>
+    <div id="sourcePill" class="pill"><span class="dot"></span><span id="sourcePillText">Source: checking</span></div>
+    <button id="muteBtn">Mute Audio Guidance</button>
   </div>
 </header>
 
@@ -285,18 +311,45 @@
     </div>
   </div>
 
+  <div class="right-stack">
+  <!-- Intent and critique -->
+  <div class="panel">
+    <div class="panel-title">Shot Intent</div>
+    <form id="intentForm" class="intent-form">
+      <label for="shotName">Shot name</label>
+      <input id="shotName" name="shot_name" value="Opening aerial" required maxlength="120" />
+      <label for="creativeGoal">Creative goal</label>
+      <textarea id="creativeGoal" name="creative_goal" rows="2" maxlength="500" required>Make the property feel imposing and cinematic.</textarea>
+      <label for="subject">Subject</label>
+      <input id="subject" name="subject" value="The main building" required maxlength="200" />
+      <label for="desiredFeel">Desired feel</label>
+      <input id="desiredFeel" name="desired_feel" value="Grand, deliberate, and premium" maxlength="160" />
+      <label for="cameraMove">Camera movement</label>
+      <input id="cameraMove" name="camera_move" value="Slow reveal with lateral movement" maxlength="120" />
+      <label for="constraints">Constraints</label>
+      <input id="constraints" name="constraints" value="Keep the subject on the right third" maxlength="160" />
+      <button type="submit">Set Shot Intent</button>
+      <div id="intentStatus" class="intent-status"></div>
+    </form>
+    <div class="panel-title">Latest Cinematic Critique</div>
+    <div id="critiquePanel" class="critique">
+      <div class="critique-empty">Set a shot intent, then bring up the live feed. The director will return the highest-impact cinematic tweaks.</div>
+    </div>
+  </div>
+
   <!-- Shot list -->
   <div class="panel">
-    <div class="panel-title">ER2 Shot List</div>
+    <div class="panel-title">Shot List Context</div>
     <div class="shot-list" id="shotList">
       <!-- Populated by JS -->
     </div>
+  </div>
   </div>
 </div>
 
 <!-- Guidance banner -->
 <div id="guidanceCard" class="guidance INFO">
-  <div class="guidance-icon" id="guidanceIcon">🎬</div>
+  <div class="guidance-icon" id="guidanceIcon">GUIDE</div>
   <div class="guidance-body">
     <div class="guidance-label">Live Director Guidance — <span id="guidancePriority">INFO</span></div>
     <div id="guidanceText">Standing by for the live feed.</div>
@@ -316,8 +369,6 @@
     "pull_away"
   ];
 
-  const PRIORITY_ICONS = { INFO: "🎬", WARNING: "⚠️", URGENT: "🚨" };
-
   let muted = false;
   let lastSpokenTimestamp = null;
 
@@ -325,7 +376,7 @@
   muteBtn.addEventListener("click", function () {
     muted = !muted;
     muteBtn.classList.toggle("muted", muted);
-    muteBtn.textContent = muted ? "🔇 Unmute Audio Guidance" : "🔊 Mute Audio Guidance";
+    muteBtn.textContent = muted ? "Unmute Audio Guidance" : "Mute Audio Guidance";
     if (muted && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
@@ -364,8 +415,7 @@
   function renderGuidance(guidance) {
     const card = document.getElementById("guidanceCard");
     card.className = "guidance " + (guidance.priority || "INFO");
-    document.getElementById("guidanceIcon").textContent =
-      PRIORITY_ICONS[guidance.priority] || "🎬";
+    document.getElementById("guidanceIcon").textContent = "GUIDE";
     document.getElementById("guidancePriority").textContent = guidance.priority || "INFO";
     document.getElementById("guidanceText").textContent = guidance.instruction || "";
     document.getElementById("guidanceTime").textContent = guidance.timestamp
@@ -380,6 +430,126 @@
       lastSpokenTimestamp = guidance.timestamp;
     }
   }
+
+  function renderIntent(intent) {
+    if (!intent) return;
+    document.getElementById("shotName").value = intent.shot_name || "";
+    document.getElementById("creativeGoal").value = intent.creative_goal || "";
+    document.getElementById("subject").value = intent.subject || "";
+    document.getElementById("desiredFeel").value = intent.desired_feel || "";
+    document.getElementById("cameraMove").value = intent.camera_move || "";
+    document.getElementById("constraints").value = (intent.constraints || []).join(", ");
+  }
+
+  function renderCritique(critique) {
+    const panel = document.getElementById("critiquePanel");
+    panel.textContent = "";
+    if (!critique) {
+      const empty = document.createElement("div");
+      empty.className = "critique-empty";
+      empty.textContent = "Waiting for the director's first structured critique.";
+      panel.appendChild(empty);
+      return;
+    }
+
+    const summary = document.createElement("div");
+    summary.className = "critique-summary";
+    summary.textContent = critique.summary;
+    panel.appendChild(summary);
+
+    (critique.tweaks || []).forEach(function (tweak) {
+      const card = document.createElement("div");
+      card.className = "tweak-card";
+
+      const meta = document.createElement("div");
+      meta.className = "tweak-meta";
+      meta.textContent = tweak.category.replace("_", " ") + " · " + tweak.priority + " · " + tweak.status;
+      card.appendChild(meta);
+
+      const diagnosis = document.createElement("div");
+      diagnosis.className = "tweak-diagnosis";
+      diagnosis.textContent = tweak.diagnosis;
+      card.appendChild(diagnosis);
+
+      const recommendation = document.createElement("div");
+      recommendation.className = "tweak-recommendation";
+      recommendation.textContent = tweak.recommendation;
+      card.appendChild(recommendation);
+
+      const rationale = document.createElement("div");
+      rationale.className = "tweak-rationale";
+      rationale.textContent = tweak.rationale;
+      card.appendChild(rationale);
+
+      if (tweak.status === "PROPOSED" || tweak.status === "ACCEPTED") {
+        const actions = document.createElement("div");
+        actions.className = "tweak-actions";
+        ["accepted", "acted", "dismissed"].forEach(function (decision) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = decision.charAt(0).toUpperCase() + decision.slice(1);
+          if (decision !== "acted") button.className = "secondary";
+          button.addEventListener("click", function () {
+            decideTweak(critique.critique_id, tweak.tweak_id, decision);
+          });
+          actions.appendChild(button);
+        });
+        card.appendChild(actions);
+      }
+      panel.appendChild(card);
+    });
+  }
+
+  async function decideTweak(critiqueId, tweakId, decision) {
+    try {
+      const response = await fetch("/api/critiques/" + encodeURIComponent(critiqueId) + "/tweaks/" + encodeURIComponent(tweakId) + "/decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: decision })
+      });
+      if (!response.ok) throw new Error("Decision was not accepted");
+    } catch (err) {
+      document.getElementById("intentStatus").textContent = err.message;
+    }
+  }
+
+  async function refreshHealth() {
+    try {
+      const response = await fetch("/health");
+      if (!response.ok) return;
+      const health = await response.json();
+      document.getElementById("sourcePillText").textContent = "Source: " + health.video_source;
+    } catch (err) {
+      document.getElementById("sourcePillText").textContent = "Source: unavailable";
+    }
+  }
+
+  document.getElementById("intentForm").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    const status = document.getElementById("intentStatus");
+    status.textContent = "Saving intent...";
+    const constraints = document.getElementById("constraints").value
+      .split(",").map(function (item) { return item.trim(); }).filter(Boolean);
+    const payload = {
+      shot_name: document.getElementById("shotName").value,
+      creative_goal: document.getElementById("creativeGoal").value,
+      subject: document.getElementById("subject").value,
+      desired_feel: document.getElementById("desiredFeel").value,
+      camera_move: document.getElementById("cameraMove").value,
+      constraints: constraints
+    };
+    try {
+      const response = await fetch("/api/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error("Intent could not be saved");
+      status.textContent = "Intent active. Watching for the first useful tweak.";
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  });
 
   function renderMetrics(metrics) {
     document.getElementById("fpsVal").textContent = Number(metrics.fps).toFixed(1);
@@ -410,6 +580,8 @@
         renderShots(state.shots || {});
         renderGuidance(state.latest_guidance || {});
         renderMetrics(state.metrics || {});
+        renderIntent(state.intent);
+        renderCritique(state.latest_critique);
       } catch (err) {
         console.error("Bad SSE payload", err);
       }
@@ -424,6 +596,8 @@
   }
 
   connectEvents();
+  refreshHealth();
+  window.setInterval(refreshHealth, 2000);
 })();
 </script>
 

@@ -23,21 +23,12 @@ from google import genai
 from google.genai import types
 
 from config import settings
+from director_prompt import SYSTEM_INSTRUCTION, intent_message
 from grafana_publisher import GrafanaPublisher
 from tools import DIRECTOR_TOOLS, execute_tool
 from video_stream import VideoStreamManager
 
 logger = logging.getLogger("cinepilot.agent")
-
-SYSTEM_INSTRUCTION = (
-    "You are CinePilot, an expert aerial cinematography director for high-end "
-    "film production. You watch incoming drone video frames continuously. You "
-    "evaluate framing, rule-of-thirds, gimbal tilt, horizon alignment, "
-    "lighting, and pacing. You actively maintain the 5-part shot list by "
-    "calling `update_shot_list` when a shot succeeds or needs re-attempting, "
-    "and you issue direct, vocal flight commands to the pilot via "
-    "`speak_director_guidance`."
-)
 
 RECONNECT_BASE_DELAY = 2.0
 RECONNECT_MAX_DELAY = 30.0
@@ -65,6 +56,9 @@ class DirectorAgent:
         self._last_frame_sent_at = 0.0
         self._rolling_fps = 0.0
         self._latency_ms = 0.0
+        self._last_intent_version = 0
+        self._observation_counter = 0
+        self._last_observation_id = "unknown-observation"
 
         self.app_state.update_metrics(grafana_status=self.grafana.status)
 
@@ -142,6 +136,7 @@ class DirectorAgent:
         ) as session:
             logger.info("Gemini Live session established")
             self.app_state.update_metrics(gemini_status="Connected")
+            await self._sync_intent(session, force=True)
 
             sender = asyncio.create_task(self._frame_sender(session))
             receiver = asyncio.create_task(self._response_receiver(session))
@@ -176,10 +171,13 @@ class DirectorAgent:
         interval = max(settings.FRAME_INTERVAL_SEC, 0.1)
         while not self._stop_event.is_set():
             started = time.monotonic()
+            await self._sync_intent(session)
             jpeg = await asyncio.to_thread(
                 self.video_manager.get_jpeg_bytes, 80, 1024
             )
             if jpeg is not None:
+                self._observation_counter += 1
+                self._last_observation_id = f"observation-{self._observation_counter}"
                 await self._send_frame(session, jpeg)
                 self._frames_sent += 1
                 now = time.monotonic()
@@ -198,6 +196,20 @@ class DirectorAgent:
                 )
             elapsed = time.monotonic() - started
             await asyncio.sleep(max(interval - elapsed, 0.05))
+
+    async def _sync_intent(self, session: Any, force: bool = False) -> None:
+        """Send the latest creator intent once per version and after reconnect."""
+        intent, version = self.app_state.intent_context()
+        if intent is None or (not force and version == self._last_intent_version):
+            return
+        await session.send_client_content(
+            turns=types.Content(
+                role="user",
+                parts=[types.Part(text=intent_message(intent.model_dump(mode="json"), version))],
+            ),
+            turn_complete=True,
+        )
+        self._last_intent_version = version
 
     async def _send_frame(self, session: Any, jpeg: bytes) -> None:
         """Send one JPEG frame as realtime video input.
@@ -277,7 +289,12 @@ class DirectorAgent:
             name = fc.name
             args = dict(fc.args or {})
             logger.info("Tool call from Gemini: %s(%s)", name, args)
-            result = execute_tool(self.app_state, name, args)
+            result = execute_tool(
+                self.app_state,
+                name,
+                args,
+                observation_id=self._last_observation_id,
+            )
             self.grafana.publish_tool_call(name, args, result)
             function_responses.append(
                 types.FunctionResponse(id=fc.id, name=name, response=result)

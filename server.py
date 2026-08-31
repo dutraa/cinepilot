@@ -11,19 +11,20 @@ DirectorAgent and the tool executors in `tools.py`.
 """
 
 import asyncio
-import copy
 import json
 import logging
-import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import cv2
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-from tools import SHOT_DEFINITIONS
+from config import settings
+from event_log import EventLog
+from schemas import IntentUpdateRequest, TweakDecisionRequest
+from state import AppState, InvalidDecisionError, StateNotFoundError
 from video_stream import VideoStreamManager
 
 logger = logging.getLogger("cinepilot.server")
@@ -31,81 +32,7 @@ logger = logging.getLogger("cinepilot.server")
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
-class AppState:
-    """Thread-safe shared application state with a change-version counter."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._version = 0
-        self.shots: Dict[str, Dict[str, str]] = {
-            shot_id: {
-                "title": title,
-                "status": "PENDING",
-                "feedback": "Awaiting first pass from the director.",
-            }
-            for shot_id, title in SHOT_DEFINITIONS.items()
-        }
-        self.latest_guidance: Dict[str, str] = {
-            "instruction": "Standing by for the live feed. Bring the drone up when ready.",
-            "priority": "INFO",
-            "timestamp": "",
-        }
-        self.metrics: Dict[str, Any] = {
-            "fps": 0.0,
-            "latency_ms": 0.0,
-            "frames_sent": 0,
-            "gemini_status": "Connecting",
-            "grafana_status": "Dry Run",
-        }
-
-    # -- mutators -------------------------------------------------------
-
-    def update_shot(self, shot_id: str, status: str, feedback: str) -> None:
-        with self._lock:
-            shot = self.shots.get(shot_id)
-            if shot is None:
-                return
-            shot["status"] = status
-            shot["feedback"] = feedback
-            self._version += 1
-
-    def set_guidance(self, instruction: str, priority: str, timestamp: str) -> None:
-        with self._lock:
-            self.latest_guidance = {
-                "instruction": instruction,
-                "priority": priority,
-                "timestamp": timestamp,
-            }
-            self._version += 1
-
-    def update_metrics(self, **kwargs: Any) -> None:
-        with self._lock:
-            changed = False
-            for key, value in kwargs.items():
-                if key in self.metrics and self.metrics[key] != value:
-                    self.metrics[key] = value
-                    changed = True
-            if changed:
-                self._version += 1
-
-    # -- accessors ------------------------------------------------------
-
-    def snapshot(self) -> Dict[str, Any]:
-        with self._lock:
-            return {
-                "version": self._version,
-                "shots": copy.deepcopy(self.shots),
-                "latest_guidance": dict(self.latest_guidance),
-                "metrics": dict(self.metrics),
-            }
-
-    @property
-    def version(self) -> int:
-        with self._lock:
-            return self._version
-
-
-app_state = AppState()
+app_state = AppState(EventLog(settings.EVENT_LOG_PATH))
 
 # Injected by main.py before the server starts.
 video_manager: Optional[VideoStreamManager] = None
@@ -123,6 +50,45 @@ app = FastAPI(title="CinePilot Director's Monitor")
 async def index() -> HTMLResponse:
     html_path = TEMPLATES_DIR / "index.html"
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/api/state")
+async def state() -> JSONResponse:
+    return JSONResponse(app_state.snapshot())
+
+
+@app.post("/api/intent")
+async def update_intent(payload: IntentUpdateRequest) -> JSONResponse:
+    version = app_state.set_intent(payload)
+    return JSONResponse(
+        {
+            "ok": True,
+            "intent_version": version,
+            "intent": payload.model_dump(mode="json"),
+        }
+    )
+
+
+@app.post("/api/critiques/{critique_id}/tweaks/{tweak_id}/decision")
+async def decide_tweak(
+    critique_id: str,
+    tweak_id: str,
+    payload: TweakDecisionRequest,
+) -> JSONResponse:
+    try:
+        status = app_state.decide_tweak(critique_id, tweak_id, payload.decision)
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(
+        {
+            "ok": True,
+            "critique_id": critique_id,
+            "tweak_id": tweak_id,
+            "status": status.value,
+        }
+    )
 
 
 @app.get("/video_feed")

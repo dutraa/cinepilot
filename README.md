@@ -1,8 +1,22 @@
-# 🎬 CinePilot
+# CinePilot
 
 **An Agentic Aerial Cinematography Director**
 
-CinePilot connects a live drone video feed to the **Google Gemini Live API** and turns it into an AI film director. Gemini watches your aerial footage in real time, evaluates framing, gimbal tilt, horizon alignment, composition, and lighting — then maintains an automated shot list and speaks flight corrections to the pilot, all rendered on a dark-mode "Director's Monitor" web dashboard.
+CinePilot connects a live drone video feed to the Google Gemini Live API and turns it into an advisory AI film director. Gemini watches footage in real time, compares it with a creator-provided shot intent, returns one to three structured cinematic tweaks, maintains the existing shot-list context, and can speak concise manual flight cues in the Director's Monitor dashboard.
+
+## Cinematic Tweak Engine
+
+The product loop is:
+
+```text
+Set shot intent -> watch the shot -> diagnose the highest-impact problem
+-> recommend a specific tweak -> creator accepts, acts, or dismisses
+-> watch the next result
+```
+
+The critique is the canonical product output. A critique contains a summary and up to three tweaks, each with a category, diagnosis, recommendation, rationale, priority, and optional spoken cue. The system is advisory: it does not control the drone or edit footage automatically.
+
+The current implementation is intentionally local and session-scoped. It writes critique and creator-action events to an append-only JSONL log for demo evidence and can optionally publish tool calls and telemetry to Grafana Loki.
 
 ## How It Works
 
@@ -26,10 +40,11 @@ flowchart LR
 
 1. **`VideoStreamManager`** grabs frames from RTMP, RTSP, a webcam, a local video file, or a synthetic OpenCV-generated aerial scene. If a live source drops, it hot-swaps to the synthetic fallback automatically so the pipeline never stalls.
 2. **`DirectorAgent`** streams JPEG frames to Gemini Live at ~1.2 FPS over a bidirectional WebSocket and listens for responses.
-3. Gemini calls two tools as it directs the shoot:
+3. Gemini calls three tools as it directs the shoot:
+   - **`publish_cinematic_critique`** — publishes one to three validated cinematic tweaks against the current intent.
    - **`update_shot_list`** — moves the 5-part shot list (Establishing Wide, Top-Down Property, Orbit Pass, Low Reveal, Pull Away) through `PENDING → IN_PROGRESS → COMPLETED / REJECTED` with directorial feedback.
    - **`speak_director_guidance`** — issues spoken flight cues ("Tilt down 15 degrees, subject is drifting off-center") at `INFO` / `WARNING` / `URGENT` priority.
-4. Every tool call and rolling frame metric (FPS, latency, frames sent) is pushed to **Grafana Loki** — or printed as structured JSON in Dry Run mode when no credentials are configured.
+4. Every tool call, critique, action decision, and rolling frame metric is recorded locally and optionally pushed to Grafana Loki.
 5. The **Director's Monitor** dashboard shows the live feed with a viewfinder HUD, the real-time shot list, and a guidance banner — and speaks new cues aloud in the browser via the Web Speech API.
 
 ## Screenshot Tour
@@ -126,6 +141,9 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 | `GET /` | The Director's Monitor dashboard. |
 | `GET /video_feed` | Live MJPEG stream (`multipart/x-mixed-replace`). |
 | `GET /events` | Server-Sent Events stream of the full app state (shot list, guidance, metrics), pushed on change or every 250 ms. |
+| `GET /api/state` | Current validated intent, critique, history, actions, shots, and metrics. |
+| `POST /api/intent` | Set the creator's current shot intent. |
+| `POST /api/critiques/{critique_id}/tweaks/{tweak_id}/decision` | Mark a tweak accepted, acted, or dismissed. |
 | `GET /health` | JSON system status: video source, Gemini/Grafana status, frames sent. |
 
 ## Project Structure
@@ -134,13 +152,20 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 cinepilot/
 ├── main.py               # CLI runner: video + web server + agent, graceful shutdown
 ├── director_agent.py     # Gemini Live session: frame sender, response receiver, reconnection
-├── tools.py              # Tool declarations (update_shot_list, speak_director_guidance) + executors
+├── tools.py              # Gemini tool declarations and validated executors
+├── schemas.py             # Strict intent, critique, tweak, and decision contracts
+├── state.py               # Thread-safe active-run state and lifecycle rules
+├── event_log.py           # Append-only JSONL evidence events
+├── director_prompt.py     # Versioned cinematic-tweak system prompt
+├── domain.py              # Dependency-free shared domain constants
 ├── video_stream.py       # Hot-swappable video sources with synthetic aerial fallback
 ├── server.py             # FastAPI app, thread-safe AppState, MJPEG + SSE endpoints
 ├── grafana_publisher.py  # Non-blocking Loki telemetry (background thread / dry-run mode)
 ├── config.py             # pydantic-settings configuration
 ├── templates/
 │   └── index.html        # Dark-mode Director's Monitor dashboard
+├── docs/                 # Evidence frame, architecture, evaluation, demo, and issues
+├── fixtures/             # Held-out evaluation manifest template
 ├── requirements.txt
 └── .env.example
 ```
@@ -162,8 +187,25 @@ A simple LogQL query to see the director at work:
 
 - **Audio guidance** uses the browser's native `speechSynthesis` — most browsers require one user interaction (a click anywhere) before audio will play. Use the header button to mute/unmute.
 - **DJI drones** can stream RTMP directly from the DJI Fly / Pilot app to a local RTMP server; point `RTMP_URL` at it.
-- The synthetic source is great for demos and development — it renders a moving subject, tilting horizon, and composition guides, which gives Gemini real material to critique.
+- The synthetic source is great for demos and development — it renders a moving subject and tilting horizon; composition guides are added only in the browser so they do not contaminate Gemini's input.
 - Frame sampling rate, JPEG quality (80), and max frame dimension (1024 px) are tuned to keep Gemini Live latency low; adjust `FRAME_INTERVAL_SEC` if you want tighter or looser direction.
+
+## Verification
+
+Run the application checks with:
+
+```bash
+python -m pytest -p no:cacheprovider -q
+ruff check --no-cache .
+python -c "import ast, pathlib; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in pathlib.Path('.').glob('*.py')]"
+```
+
+For an isolated browser smoke check, start the synthetic server and capture the dashboard with Playwright Chromium:
+
+```bash
+python main.py --source synthetic
+npx --yes playwright screenshot --browser=chromium http://127.0.0.1:8000 dashboard.png
+```
 
 ## License
 

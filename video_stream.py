@@ -12,7 +12,6 @@ import logging
 import math
 import threading
 import time
-from datetime import datetime
 from typing import Optional
 
 import cv2
@@ -263,56 +262,4 @@ class VideoStreamManager:
         subj_r = int(26 + 8 * math.sin(t * 0.8))
         cv2.circle(frame, (subj_x, subj_y), subj_r, (30, 30, 200), -1, cv2.LINE_AA)
         cv2.circle(frame, (subj_x, subj_y), subj_r + 8, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(
-            frame,
-            "SUBJECT",
-            (subj_x - 40, subj_y - subj_r - 14),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
-        # Rule-of-thirds composition guides.
-        third_color = (200, 200, 200)
-        for fx in (1 / 3, 2 / 3):
-            x = int(SYNTH_WIDTH * fx)
-            cv2.line(frame, (x, 0), (x, SYNTH_HEIGHT), third_color, 1, cv2.LINE_AA)
-        for fy in (1 / 3, 2 / 3):
-            y = int(SYNTH_HEIGHT * fy)
-            cv2.line(frame, (0, y), (SYNTH_WIDTH, y), third_color, 1, cv2.LINE_AA)
-
-        # HUD: frame counter, timestamp, source badge.
-        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(
-            frame,
-            f"FRAME {self._synthetic_tick:07d}",
-            (18, 34),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 180),
-            2,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            frame,
-            stamp,
-            (18, SYNTH_HEIGHT - 22),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            frame,
-            f"SRC: {self.active_source.upper()}",
-            (SYNTH_WIDTH - 320, 34),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 200, 255),
-            2,
-            cv2.LINE_AA,
-        )
         return frame
