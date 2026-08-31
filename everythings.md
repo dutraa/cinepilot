@@ -8,7 +8,19 @@ CinePilot is an advisory AI cinematic decision engine that watches a creator's f
 
 ## 2. The pain we are testing
 
-Creators often know a shot is not working but cannot turn that feeling into a precise correction. On small productions, vague feedback, missing coverage, unnecessary retakes, and the absence of an experienced cinematographer make the problem expensive.
+Creators often know that a shot does not feel right but cannot turn that feeling into a precise correction. Feedback is frequently vague: “make it more cinematic,” “this feels flat,” or “the shot is not working.” On smaller productions, there may be no experienced cinematographer, continuity person, or director available to give immediate feedback, so weak framing, wrong camera movement, bad pacing, lighting problems, continuity issues, and missing coverage may only be discovered after shooting. Creators may also generate several versions without knowing which one is better or what specifically changed.
+
+This is the product problem CinePilot is intended to solve. Instead of stopping at mechanical drone commands such as “move left” or “tilt down,” CinePilot should understand what the shot is trying to achieve and recommend the highest-impact cinematic tweak. That can involve framing, camera angle, movement, lens feel, lighting, pacing, subject placement, continuity, or expression. Each recommendation should connect a visible or story-level problem to a concrete change and explain why that change serves the intended result.
+
+The complete target loop is:
+
+```text
+watch the shot -> understand the story/shot intent -> identify what is wrong or missing
+  -> recommend the best tweak or next shot
+  -> creator optionally applies it -> evaluate the result again
+```
+
+The current drone workflow is the hero starting point, not the permanent boundary. The longer-term decision engine may accept uploaded footage, generated video, phones, webcams, and other cameras. Those are future input paths, not current capabilities, and each must be evaluated separately before broader product claims are made.
 
 The focused promise is not “AI flies a drone.” It is:
 

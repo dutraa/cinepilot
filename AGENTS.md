@@ -6,6 +6,22 @@ CinePilot is a local, advisory AI cinematic decision engine. It watches live, pr
 
 The product is not an autonomous drone pilot, an editor, or a replacement for a director or cinematographer. The creator remains responsible for flight safety, creative approval, and marking whether a recommendation was actually acted on.
 
+## Creator problem being solved
+
+Creators often know that a shot does not feel right but cannot identify exactly what to change. Feedback is frequently vague: “make it more cinematic,” “this feels flat,” or “the shot is not working.” On smaller productions there may be no experienced cinematographer, continuity person, or director available to give immediate feedback, so weak framing, unsuitable camera movement, bad pacing, lighting problems, continuity issues, or missing coverage may only be discovered after the shoot. Creators may also generate several versions without a reliable way to understand which version is better or why.
+
+CinePilot must turn that uncertainty into a small number of high-impact, explainable cinematic decisions across composition, camera angle, movement, lens feel, lighting, pacing, subject placement, continuity, and expression. The recommendation must state the visible or story-level problem, the concrete change to try, and why that change serves the intended result. A drone command such as “move left” is only useful when it is connected to that creative reasoning.
+
+The intended product loop is:
+
+```text
+watch the shot -> understand the story/shot intent -> identify what is wrong or missing
+  -> recommend the highest-impact tweak or next shot
+  -> creator optionally applies it -> evaluate the result again
+```
+
+Drone footage is the initial hero input, not the permanent product boundary. The same decision engine should eventually support uploaded footage, generated video, phones, webcams, and other cameras. Do not claim that this broader intelligence exists until each input path has been implemented and evaluated.
+
 ## Product priorities
 
 Use this cut order whenever scope is constrained:
