@@ -1,8 +1,10 @@
 # CinePilot Demo Script
 
-This script has two layers. The story-aware path is the product narrative; the current critique path is the implemented fallback until Issue 8 is complete.
+This script has two layers. The story-aware path is the primary deterministic
+demo surface; the current critique path remains available for live Gemini
+critique behavior.
 
-## Story-aware mock demo (next slice)
+## Story-aware mock demo
 
 ### Seeded story
 
@@ -18,14 +20,16 @@ Beats:
 
 ### Intended walkthrough
 
-1. Load the seeded story and show the five ordered beats.
-2. Set the active beat to Isolation.
+1. Start `python main.py --source synthetic --demo-mode` and open the monitor.
+2. Load the seeded story and show the five ordered beats.
 3. Show the live drone feed or synthetic aerial scene.
 4. Ask CinePilot what the current shot proves and what story coverage is missing.
 5. Show two or three recommendations with story purpose, visual objective, why now, and manual execution guidance.
 6. Select “Descending reveal” and explain that selection is a creator decision, not an automated flight command.
 7. Capture or simulate the next take and mark it completed.
 8. Show Discovery moving to covered and the next missing beat becoming active.
+9. Explain that completion records capture and coverage state; the next result
+   must be evaluated separately.
 
 The demo is complete only when the audience can see the causal loop: story intent changes the recommendation, the current shot changes the missing coverage, and creator action changes the state.
 

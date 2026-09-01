@@ -24,7 +24,9 @@ load mock story -> watch current shot -> identify current beat and missing cover
 -> mark coverage complete -> evaluate the next result
 ```
 
-The seeded story and exact walkthrough are in `docs/demo-script.md`. The story-aware contracts are planned, not yet implemented; do not describe them as shipped functionality until the corresponding issue is complete.
+The seeded story and exact walkthrough are in `docs/demo-script.md`. The
+story-aware contracts and deterministic mock loop are implemented locally; live
+Gemini story reasoning remains separately labeled and requires a configured key.
 
 The current implementation is intentionally local and session-scoped. It writes critique and creator-action events to an append-only JSONL log for demo evidence and can optionally publish tool calls and telemetry to Grafana Loki.
 
@@ -64,7 +66,7 @@ flowchart LR
 - **Bottom banner** — the most recent guidance cue; `WARNING` and `URGENT` cues glow and pulse for visibility.
 - **Header** — glowing status pills for Gemini (Connected / Connecting / Disconnected) and Grafana (Live / Dry Run), plus a mute toggle for audio guidance.
 
-The story-aware dashboard will add a coverage panel that answers: what beat are we in, what did the current shot prove, what is missing, and which next shot can advance the story. This is the intended next slice, not a claim about the current UI.
+The story-aware dashboard now answers: what beat are we in, what did the current shot prove, what is missing, and which next shot can advance the story. Deterministic fixture behavior is labeled separately from live Gemini behavior.
 
 ## Quick Start
 
@@ -106,6 +108,13 @@ No drone handy? Start with the built-in synthetic aerial scene:
 
 ```bash
 python main.py --source synthetic
+```
+
+To run the repeatable story-aware mock demo without a Gemini key, drone, RTMP,
+or Grafana:
+
+```bash
+python main.py --source synthetic --demo-mode
 ```
 
 Then open **http://127.0.0.1:8000** in your browser.
@@ -156,6 +165,12 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 | `GET /api/state` | Current validated intent, critique, history, actions, shots, and metrics. |
 | `POST /api/intent` | Set the creator's current shot intent. |
 | `POST /api/critiques/{critique_id}/tweaks/{tweak_id}/decision` | Mark a tweak accepted, acted, or dismissed. |
+| `GET /api/story` | Return the story, ordered beats, active beat, versions, and provenance. |
+| `POST /api/story/beat` | Activate or skip a beat through the state machine. |
+| `GET /api/coverage` | Return captured, covered, and missing story proof. |
+| `GET /api/recommendations` | Return latest recommendations and history. |
+| `POST /api/recommendations` | Publish a validated manual recommendation batch. |
+| `POST /api/recommendations/{id}/decision` | Select, complete, or dismiss a recommendation. |
 | `GET /health` | JSON system status: video source, Gemini/Grafana status, frames sent. |
 
 ## Project Structure
@@ -174,12 +189,14 @@ cinepilot/
 ├── server.py             # FastAPI app, thread-safe AppState, MJPEG + SSE endpoints
 ├── grafana_publisher.py  # Non-blocking Loki telemetry (background thread / dry-run mode)
 ├── config.py             # pydantic-settings configuration
+├── story_demo.py          # Strict seeded story fixture loader
+├── demo_provider.py       # Explicit deterministic recommendation provider
 ├── templates/
 │   └── index.html        # Dark-mode Director's Monitor dashboard
 ├── AGENTS.md             # Operating contract for coding agents
 ├── everythings.md        # Compact source-of-truth project map
 ├── docs/                 # Evidence frame, spec, architecture, decisions, evaluation, demo, issues
-├── fixtures/             # Held-out evaluation manifest template
+├── fixtures/             # Seeded story and held-out evaluation manifest
 ├── requirements.txt
 └── .env.example
 ```

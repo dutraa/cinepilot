@@ -2,7 +2,7 @@
 
 ## Objective
 
-Determine whether CinePilot provides more specific and useful cinematic direction than a manual baseline for the same shot intent, and whether the planned story-aware mode helps a creator choose a useful next shot for missing coverage.
+Determine whether CinePilot provides more specific and useful cinematic direction than a manual baseline for the same shot intent, and whether the story-aware mode helps a creator choose a useful next shot for missing coverage.
 
 ## Required artifacts
 
@@ -43,6 +43,11 @@ coverage_usefulness_rate = useful_recommendations / eligible_recommendations
 
 Only metrics mapped to a verified decision-maker scoreboard may become headline KPIs. Latency and validity remain supporting metrics.
 
+For the story-aware slice, the eligible unit is a published next-shot
+recommendation. A batch of three contributes three eligible recommendation
+records. Deterministic fixture recommendations, synthetic footage, live Gemini,
+and real drone footage are separate evidence strata and must not be pooled.
+
 ## Story-aware grading rubric
 
 An eligible next-shot recommendation is useful only when an independent reviewer can identify:
@@ -61,3 +66,5 @@ Selection or completion is evidence of creator behavior, not proof of recommenda
 - Failed, malformed, and rejected attempts stay in denominators.
 - Every reported percentage includes numerator, denominator, and `n`.
 - Results from synthetic footage are labeled synthetic.
+- Recommendation publication, selection, and completion are separate events;
+  completion is not evidence that the resulting shot improved.

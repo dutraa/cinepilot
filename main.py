@@ -6,6 +6,7 @@ SIGINT / Ctrl+C.
 
 Usage examples:
     python main.py --source synthetic
+    python main.py --source synthetic --demo-mode
     python main.py --source rtmp --rtmp-url rtmp://127.0.0.1:1935/live/drone
     python main.py --source file --video-path .\\footage\\flight01.mp4
     python main.py --source webcam --port 8080
@@ -22,6 +23,7 @@ import uvicorn
 
 import server
 from config import settings
+from demo_provider import DeterministicDemoProvider
 from director_agent import DirectorAgent
 from grafana_publisher import GrafanaPublisher
 from video_stream import VideoStreamManager
@@ -56,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=f"Web UI port (default: {settings.PORT}).",
     )
+    parser.add_argument(
+        "--demo-mode",
+        action="store_true",
+        help="Run the explicit deterministic story demo without Gemini or hardware.",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +95,15 @@ async def run_app(args: argparse.Namespace) -> None:
     )
     video_manager.start()
     server.set_video_manager(video_manager)
+    server.app_state.set_provenance(
+        "deterministic_demo" if args.demo_mode else "live",
+        video_manager.active_source,
+    )
+
+    demo_provider = DeterministicDemoProvider() if args.demo_mode else None
+    server.set_demo_provider(demo_provider)
+    if demo_provider is not None:
+        demo_provider.seed(server.app_state)
 
     # --- Telemetry + agent ---
     grafana = GrafanaPublisher()

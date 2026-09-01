@@ -70,15 +70,44 @@ Returns an MJPEG stream. The synthetic source is valid for shell/demo verificati
 
 Returns source provenance, Gemini status, Grafana status, and frames sent.
 
-## Next story-aware contracts
+## Story-aware contracts
 
-The next-shot demo should add these models without weakening current contracts:
+The story-aware demo adds these models without weakening current contracts:
 
 - `StoryBrief`: seeded story metadata, emotional arc, must-show items, constraints, and ordered beats.
 - `StoryBeat`: story job, required visual proof, and server-managed coverage status.
 - `ShotRecommendation`: story purpose, visual objective, why-now explanation, manual execution guidance, safety notes, priority, confidence, and server-managed status.
 
 The exact field names and limits must be introduced with tests and documented in an ADR or this section in the same commit. Model-provided IDs and statuses remain forbidden.
+
+`ShotRecommendationInput` is the untrusted Gemini/browser shape. It accepts no
+recommendation ID, timestamp, status, intent version, or prompt version. The
+server adds those fields when it publishes a validated batch of two or three
+recommendations. Supported cinematic categories include composition, camera
+angle and movement, lens feel, lighting, pacing, subject placement, continuity,
+and expression.
+
+The seeded fixture is `fixtures/story.json`. Explicit deterministic demo mode
+loads it and publishes repeatable recommendations through the same state,
+event-log, API, SSE, and dashboard paths as live Gemini:
+
+```text
+python main.py --source synthetic --demo-mode
+```
+
+Story beats use `pending -> active -> covered` or `active -> skipped`.
+Recommendations use `suggested -> selected -> completed`, with dismissal from
+suggested or selected. Completion records capture and advances coverage; it is
+not an evaluation that the resulting shot improved.
+
+## Story-aware API
+
+`GET /api/story`, `POST /api/story/beat`, `GET /api/coverage`,
+`GET /api/recommendations`, `POST /api/recommendations`, and
+`POST /api/recommendations/{id}/decision` expose the canonical story loop.
+Unknown IDs return 404, invalid transitions return 409, invalid payloads return
+422, and safe repeats return 200. `/api/state` and `/events` include the same
+story, coverage, recommendation, and provenance fields.
 
 ## Configuration
 
@@ -104,4 +133,3 @@ The exact field names and limits must be introduced with tests and documented in
 - Event-log failures are logged but do not stop the live loop.
 - Missing Gemini credentials leave the shell usable and report a visible disconnected state.
 - No safety-critical flight advice is presented as an automated command or guarantee.
-

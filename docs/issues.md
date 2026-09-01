@@ -399,3 +399,13 @@ The deterministic path is the release cut line. If time is limited, stop after `
 | Recommendations imply unsafe control | Advisory wording, safety notes, manual selection, and no flight-control API |
 | Multi-agent scope expands | Keep one `DirectorAgent` until usefulness evidence justifies decomposition |
 | Demo claims outrun evidence | Complete the manual baseline and independent grading before outcome claims |
+
+## Issue 8 implementation status — 2026-09-01
+
+Implemented locally on `feature/cinematic-tweak-engine`: 8.1 story fixture,
+8.2 strict story/coverage/recommendation contracts, 8.3 explicit deterministic
+demo mode, 8.4 canonical story and recommendation transitions, 8.5 Gemini tool
+and versioned story context, 8.6 API/SSE routes, and 8.7 story-first dashboard.
+The 8.8 verification gates are run for this change; the manual held-out
+baseline and independent reviewer evidence remain pending, so no production
+outcome claim is made.

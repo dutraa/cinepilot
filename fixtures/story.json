@@ -1,0 +1,65 @@
+{
+  "story_id": "place-worth-coming-back-to",
+  "title": "The place worth coming back to",
+  "logline": "A remote mountain lodge reopens after a storm, and the audience should feel the journey from isolation to confidence that it is alive again.",
+  "emotional_arc": "isolation, discovery, invitation, renewal, confidence",
+  "visual_style": "Cinematic mountain aerials with restrained movement, natural light, and a clear sense of destination.",
+  "must_show": [
+    "The lodge in its remote mountain setting",
+    "A discoverable route toward the entrance",
+    "A welcoming threshold",
+    "Signs of people, light, and recovery",
+    "A resolved closing image"
+  ],
+  "constraints": [
+    "All capture guidance is manual and advisory.",
+    "Maintain a safe distance from terrain, people, structures, and weather hazards.",
+    "Do not treat a recommendation as a flight command."
+  ],
+  "beats": [
+    {
+      "beat_id": "isolation",
+      "title": "Isolation",
+      "story_job": "Establish distance and vulnerability before the audience knows the destination.",
+      "required_visual_proof": "A high wide image with the lodge small in a large landscape.",
+      "status": "active"
+    },
+    {
+      "beat_id": "discovery",
+      "title": "Discovery",
+      "story_job": "Let the audience find the lodge inside the landscape.",
+      "required_visual_proof": "A descending or forward reveal in which the lodge grows in frame.",
+      "status": "pending"
+    },
+    {
+      "beat_id": "invitation",
+      "title": "Invitation",
+      "story_job": "Make the destination feel reachable and welcoming.",
+      "required_visual_proof": "A smooth approach or lateral move toward the entrance.",
+      "status": "pending"
+    },
+    {
+      "beat_id": "renewal",
+      "title": "Renewal",
+      "story_job": "Show human activity and recovery after the storm.",
+      "required_visual_proof": "An orbit or rise revealing people, lights, or movement.",
+      "status": "pending"
+    },
+    {
+      "beat_id": "confidence",
+      "title": "Confidence",
+      "story_job": "End with scale and a resolved destination the audience can trust.",
+      "required_visual_proof": "A pull-away or elevated closing image with a clear destination.",
+      "status": "pending"
+    }
+  ],
+  "initial_shot": {
+    "beat_id": "isolation",
+    "shot_title": "High establishing wide",
+    "observation_id": "synthetic-observation-isolation-001",
+    "source": "synthetic",
+    "notes": "The lodge is small in a broad mountain landscape; isolation is visible, but the route and human renewal are not yet proven.",
+    "contribution": "The current shot proves the lodge is remote and vulnerable.",
+    "limitations": "It does not yet show how the audience discovers the lodge, reaches it, or sees it come back to life."
+  }
+}

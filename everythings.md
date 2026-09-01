@@ -40,17 +40,13 @@ Implemented on `feature/cinematic-tweak-engine`:
 - creator action lifecycle: proposed, accepted, acted, dismissed;
 - append-only JSONL event evidence;
 - API and SSE state exposure;
-- dashboard centered on intent and current cinematic tweaks;
+- seeded story-aware next-shot demo with coverage transitions;
+- dashboard centered on story coverage with a secondary current-shot critique;
 - optional Grafana Loki telemetry;
 - tests and local synthetic/browser smoke verification.
 
-Not implemented yet:
+Still not implemented:
 
-- story brief and story-beat contracts;
-- shot-coverage inventory;
-- story-aware next-shot recommendations;
-- selected/completed next-shot lifecycle;
-- a seeded mock story demo that visibly closes the story loop;
 - real creator baseline and held-out evidence run.
 
 ## 4. Mock demo to build next
@@ -93,9 +89,9 @@ Possible next shots:
 
 The recommendation must explain the story reason, not only give a mechanical command.
 
-## 5. Proposed story-aware contracts
+## 5. Story-aware contracts
 
-These are the next contracts; they are not yet implemented.
+These story-aware contracts are implemented for the deterministic mock demo.
 
 ```text
 StoryBrief
@@ -129,7 +125,7 @@ ShotRecommendation
   status: suggested | selected | completed | dismissed
 ```
 
-Gemini may propose the narrative fields, but the server owns IDs, timestamps, status transitions, and provenance. All model output remains untrusted until validated.
+Gemini may propose the narrative fields, but the server owns IDs, timestamps, status transitions, and provenance. All model output remains untrusted until validated. `python main.py --source synthetic --demo-mode` uses the same state, validation, API, SSE, and UI path with deterministic fixture provenance.
 
 ## 6. Repository map
 
@@ -157,7 +153,7 @@ Gemini may propose the narrative fields, but the server owns IDs, timestamps, st
 
 ```text
 video source -> sampled frame -> Gemini Live
-story/intent -> versioned Gemini context
+  story/intent -> versioned Gemini context or deterministic provider
 Gemini tool call -> strict validation -> AppState
 AppState -> JSONL evidence + optional Grafana
 AppState -> SSE/API -> dashboard
@@ -178,7 +174,7 @@ The browser is a view and command surface. It must not invent canonical state. G
 | `POST` | `/api/critiques/{critique_id}/tweaks/{tweak_id}/decision` | Record tweak decision |
 | `GET` | `/health` | Source, Gemini, Grafana, and frame status |
 
-The story-aware slice should add the smallest possible API surface: story load/set, coverage snapshot, next-shot recommendation publication, and recommendation decision. Update `docs/architecture.md` and tests in the same change.
+The story-aware slice adds the smallest useful API surface: story load/set, coverage snapshot, next-shot recommendation publication, and recommendation decision. See `docs/SPEC.md` for routes and tests.
 
 ## 9. Evidence frame summary
 
@@ -205,7 +201,7 @@ Supporting metrics include first recommendation latency, valid recommendation ra
 
 ## 11. Issue sequence
 
-Issues 1–7 cover the existing cinematic critique engine and hardening. The next slice is the local parent Issue 8, broken into implementation sub-issues in `docs/issues.md`:
+Issues 1–7 cover the existing cinematic critique engine and hardening. The local parent Issue 8 story-aware slice is broken into implementation sub-issues in `docs/issues.md`:
 
 ### Issue 8 — Build the story-aware next-shot mock demo
 
