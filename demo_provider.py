@@ -23,15 +23,6 @@ _RECOMMENDATION_COPY: dict[str, list[dict[str, str]]] = {
             "safety_notes": "The pilot confirms route, weather, obstacles, people, and a clear return path before capture.",
         },
         {
-            "beat_id": "discovery",
-            "title": "Forward ridge reveal",
-            "story_purpose": "Turn the landscape into a path that leads the audience to the lodge.",
-            "visual_objective": "Let the lodge emerge from behind a foreground ridge without losing its scale.",
-            "why_now": "A reveal supplies the missing transition between remote context and a discoverable destination.",
-            "execution_guidance": "Manually frame the ridge as foreground, then make a restrained forward move while maintaining safe separation.",
-            "safety_notes": "The pilot checks terrain clearance, wind, signal, and the planned exit before attempting the move.",
-        },
-        {
             "beat_id": "invitation",
             "title": "Lateral parallax pass",
             "story_purpose": "Make the route to the lodge feel reachable and welcoming.",
@@ -39,6 +30,15 @@ _RECOMMENDATION_COPY: dict[str, list[dict[str, str]]] = {
             "why_now": "The wide establishes distance; a lateral layer can now translate that distance into an inviting route.",
             "execution_guidance": "Manually move laterally at a restrained pace, preserving the right-third placement and a safe clearance envelope.",
             "safety_notes": "The pilot confirms the lateral corridor is clear and does not treat this guidance as an automated flight command.",
+        },
+        {
+            "beat_id": "confidence",
+            "title": "Restrained pull-away",
+            "story_purpose": "Give the audience a calm sense of the lodge as a destination worth returning to.",
+            "visual_objective": "Let the lodge settle into the wider landscape without losing its readable shape.",
+            "why_now": "A release option gives the creator a measured way to test closure while discovery and invitation remain open.",
+            "execution_guidance": "Manually pull away at a restrained pace while keeping the lodge legible and preserving a safe retreat path.",
+            "safety_notes": "The pilot checks terrain, people, weather, battery, and the retreat path before any manual movement.",
         },
     ],
     "invitation": [

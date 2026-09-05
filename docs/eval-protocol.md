@@ -59,6 +59,19 @@ An eligible next-shot recommendation is useful only when an independent reviewer
 
 Selection or completion is evidence of creator behavior, not proof of recommendation quality. Report it alongside independent grading and include all eligible recommendations in the denominator.
 
+For Visualize, the eligible unit is a ready preview and its linked
+recommendation. A job must contain exactly three previews, use one server-
+decoded frozen observation, and remain in a separately labeled deterministic,
+synthetic, file, webcam, RTSP, RTMP, or live evidence stratum. Report renderer
+validity, source provenance, profile adherence, temporal stability, and place
+fidelity as separate supporting dimensions; a contract pass is not a spatial-
+accuracy pass. The animation profile illustrates screen-space motion over the
+JPEG and cannot be graded as obstacle awareness or a flight route. Preview
+selection is creator behavior and manual handoff, not evidence that the
+captured shot improved. Failed, malformed, retried, and rejected attempts stay
+in denominators. The scheduled manual baseline and independent review in
+`docs/evidence-frame.md` must be complete before any outcome claim.
+
 ## Integrity rules
 
 - Prompt examples and evaluation clips must be disjoint.

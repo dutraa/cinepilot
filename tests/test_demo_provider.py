@@ -13,7 +13,7 @@ def test_demo_provider_seeds_repeatable_recommendations_and_advances(tmp_path) -
 
     assert [item.recommendation_id for item in first] == [item.recommendation_id for item in repeated]
     assert all(item.provenance == "deterministic_demo" for item in first)
-    assert {item.beat_id for item in first} == {"discovery", "invitation"}
+    assert {item.beat_id for item in first} == {"discovery", "invitation", "confidence"}
 
     second_state = AppState(EventLog(str(tmp_path / "second-events.jsonl")))
     second = DeterministicDemoProvider().seed(second_state)

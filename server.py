@@ -20,7 +20,7 @@ from uuid import uuid4
 
 import cv2
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from config import settings
 from event_log import EventLog
@@ -30,6 +30,8 @@ from schemas import (
     ShotRecommendationBatchInput,
     StoryBeatRequest,
     TweakDecisionRequest,
+    VisualizationRequestInput,
+    VisualizationSourceKind,
 )
 from state import AppState, InvalidDecisionError, StateNotFoundError
 from video_stream import VideoStreamManager
@@ -128,6 +130,89 @@ async def recommendations() -> JSONResponse:
             "story_context_version": snapshot["story_context_version"],
         }
     )
+
+
+def _visualization_source() -> tuple[VisualizationSourceKind, str]:
+    source = video_manager.active_source if video_manager is not None else "unknown"
+    if source == "unknown" and app_state.snapshot()["provenance"].get("mode") == "deterministic_demo":
+        return VisualizationSourceKind.SYNTHETIC, "synthetic"
+    if source == "synthetic" or source.startswith("synthetic"):
+        return VisualizationSourceKind.SYNTHETIC, source
+    if source == "file":
+        return VisualizationSourceKind.FILE, source
+    if source == "webcam":
+        return VisualizationSourceKind.WEBCAM, source
+    if source == "rtsp":
+        return VisualizationSourceKind.RTSP, source
+    if source == "rtmp":
+        return VisualizationSourceKind.RTMP, source
+    return VisualizationSourceKind.LIVE, source
+
+
+def _latest_visualization_frame() -> bytes | None:
+    if video_manager is not None:
+        frame = video_manager.get_jpeg_bytes(quality=90, max_dim=1024)
+        if frame is not None:
+            return frame
+    snapshot = app_state.snapshot()
+    if snapshot["provenance"].get("mode") == "deterministic_demo":
+        return VideoStreamManager(source="synthetic").get_deterministic_synthetic_jpeg()
+    return None
+
+
+@app.post("/api/visualizations")
+async def create_visualization(payload: VisualizationRequestInput) -> JSONResponse:
+    frame = _latest_visualization_frame()
+    if frame is None:
+        raise HTTPException(status_code=409, detail="current observation is unavailable")
+    source_kind, source_label = _visualization_source()
+    try:
+        job = app_state.request_visualization(
+            payload,
+            source_frame=frame,
+            provenance=app_state.snapshot()["provenance"].get("mode", "live"),
+            source_kind=source_kind,
+            source_label=source_label,
+        )
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(job.model_dump(mode="json"))
+
+
+@app.get("/api/visualizations")
+async def list_visualizations() -> JSONResponse:
+    snapshot = app_state.snapshot()
+    return JSONResponse(
+        {
+            "visualizations": snapshot["visualization_jobs"],
+            "jobs": snapshot["visualization_jobs"],
+            "latest_visualization_job": snapshot["latest_visualization_job"],
+        }
+    )
+
+
+@app.get("/api/visualizations/{job_id}")
+async def get_visualization(job_id: str) -> JSONResponse:
+    job = next(
+        (item for item in app_state.snapshot()["visualization_jobs"] if item["job_id"] == job_id),
+        None,
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"visualization job not found: {job_id}")
+    return JSONResponse(job)
+
+
+@app.get("/api/visualizations/{job_id}/source-frame")
+async def get_visualization_source_frame(job_id: str) -> Response:
+    try:
+        frame = app_state.get_visualization_source_frame(job_id)
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(content=frame, media_type="image/jpeg")
 
 
 @app.post("/api/recommendations")

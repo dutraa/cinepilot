@@ -26,10 +26,29 @@ Beats:
 4. Ask CinePilot what the current shot proves and what story coverage is missing.
 5. Show two or three recommendations with story purpose, visual objective, why now, and manual execution guidance.
 6. Select “Descending reveal” and explain that selection is a creator decision, not an automated flight command.
-7. Capture or simulate the next take and mark it completed.
-8. Show Discovery moving to covered and the next missing beat becoming active.
-9. Explain that completion records capture and coverage state; the next result
+7. In the existing dashboard, click “Visualize this place” during a safe hover or after a short evidence burst.
+8. Show exactly three 10-second concepts over the frozen source frame, each labeled “AI visualization — illustrative creative reference, not flight truth.”
+9. Select one concept and show its manual capture brief: story purpose, visual objective, why now, guidance, and safety notes. Explain that selection is not capture, coverage completion, or proof of improvement.
+10. Capture or simulate the next take and mark the linked recommendation completed.
+11. Show Discovery moving to covered and the next missing beat becoming active.
+12. Explain that completion records capture and coverage state; the next result
    must be evaluated separately.
+
+### Real-place source variant
+
+Run with a real prerecorded or camera source, for example
+`python main.py --source file --video-path .\footage\place.mp4` or a configured
+`webcam`, `rtsp`, or `rtmp` source. Wait until the monitor shows a current frame,
+then request Visualize. Confirm that the panel identifies the source kind and
+label, the frozen-frame dimensions, the deterministic renderer version, and
+the same three fixed screen-space profiles. A real source makes the reference
+visually grounded in that place; it does not turn the 2D motion into a physical
+camera path, a reconstruction, or a safety assessment.
+
+If the source is disconnected, the Visualize action must remain unavailable.
+If rendering fails, show the failure and retry without changing story
+coverage. Do not present a provider-backed or spatial-previs claim from this
+deterministic source variant.
 
 The demo is complete only when the audience can see the causal loop: story intent changes the recommendation, the current shot changes the missing coverage, and creator action changes the state.
 

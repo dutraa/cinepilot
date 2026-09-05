@@ -42,12 +42,18 @@ Implemented on `feature/cinematic-tweak-engine`:
 - API and SSE state exposure;
 - seeded story-aware next-shot demo with coverage transitions;
 - dashboard centered on story coverage with a secondary current-shot critique;
+- deterministic Visualize panel with three 10-second concepts over a frozen source frame and manual capture handoff;
+- production-safe visualization foundation with decodeable source snapshots,
+  provenance, renderer/profile contracts, quality metadata, bounded retries,
+  and one-preview selection per visualization job;
 - optional Grafana Loki telemetry;
 - tests and local synthetic/browser smoke verification.
 
 Still not implemented:
 
 - real creator baseline and held-out evidence run.
+- live video-generation provider, spatial reconstruction, visualization
+  persistence, and gallery/history.
 
 ## 4. Mock demo to build next
 
@@ -176,6 +182,15 @@ The browser is a view and command surface. It must not invent canonical state. G
 
 The story-aware slice adds the smallest useful API surface: story load/set, coverage snapshot, next-shot recommendation publication, and recommendation decision. See `docs/SPEC.md` for routes and tests.
 
+The deterministic Visualize slice adds session-local visualization jobs and
+three linked preview records through `POST /api/visualizations`, the matching
+GET job/list/source-frame routes, and the existing recommendation decision
+route. The browser animates fixed screen-space profiles over a server-frozen
+JPEG and shows source kind, snapshot dimensions, renderer version, and quality
+notes. The renderer boundary is provider-neutral, but the current implementation
+uses only the deterministic renderer; it never receives a flight plan or owns
+canonical state.
+
 ## 9. Evidence frame summary
 
 The immediate decision-maker is the founder/team deciding whether to continue pilot and demo work. The external evaluator and creator scoreboard are still discovery items. Until a real scoreboard and baseline are confirmed, all internal metrics remain supporting evidence.
@@ -185,6 +200,12 @@ The first honest claim is:
 > In a live multimodal workflow, CinePilot can produce structured, story-aware cinematic recommendations for creator review.
 
 The following claims require a comparator and measured baseline: better shots, fewer retakes, reduced production time, improved coverage, or replacement of expert crew.
+
+The deterministic Visualize slice supports only the narrower claim that CinePilot
+can render three clearly labeled, story-linked 10-second concept animations over
+a captured source frame and hand the selected concept to a manual capture
+workflow. It does not establish shot improvement, flight safety, spatial
+accuracy, or live provider quality.
 
 ## 10. Evaluation plan
 

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field, confloat, field_validator
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, confloat, field_validator, model_validator
 
 
 class TweakCategory(str, Enum):
@@ -56,6 +57,35 @@ class RecommendationDecision(str, Enum):
     SELECTED = "selected"
     COMPLETED = "completed"
     DISMISSED = "dismissed"
+
+
+class VisualizationJobStatus(str, Enum):
+    REQUESTED = "requested"
+    RENDERING = "rendering"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class VisualizationQualityStatus(str, Enum):
+    PASS = "pass"
+    WARN = "warn"
+    FAIL = "fail"
+
+
+class VisualizationSourceKind(str, Enum):
+    UNKNOWN = "unknown"
+    SYNTHETIC = "synthetic"
+    FILE = "file"
+    WEBCAM = "webcam"
+    RTSP = "rtsp"
+    RTMP = "rtmp"
+    LIVE = "live"
+
+
+class AnimationProfile(str, Enum):
+    DESCENDING_REVEAL = "descending_reveal"
+    LATERAL_PARALLAX = "lateral_parallax"
+    RESTRAINED_PULL_AWAY = "restrained_pull_away"
 
 
 class StrictModel(BaseModel):
@@ -191,6 +221,146 @@ class TweakDecisionRequest(StrictModel):
 
 class RecommendationDecisionRequest(StrictModel):
     decision: RecommendationDecision
+
+
+class VisualizationRequestInput(StrictModel):
+    """The only browser/provider input accepted by the visualize workflow."""
+
+    duration_seconds: Literal[10]
+    variation_count: Literal[3]
+
+
+class AnimationProfileSpec(StrictModel):
+    """Server-owned screen-space motion metadata for one concept preview."""
+
+    profile: AnimationProfile
+    scale_start: confloat(ge=1.0, le=2.0)
+    scale_end: confloat(ge=1.0, le=2.0)
+    horizontal_drift_pct: confloat(ge=-25.0, le=25.0)
+    vertical_drift_pct: confloat(ge=-25.0, le=25.0)
+    subject_anchor: Literal["center", "right_third"]
+
+    @model_validator(mode="after")
+    def validate_fixed_motion(self) -> "AnimationProfileSpec":
+        expected = {
+            AnimationProfile.DESCENDING_REVEAL: (1.0, 1.25, 0.0, 14.0, "center"),
+            AnimationProfile.LATERAL_PARALLAX: (1.08, 1.08, 12.0, 0.0, "right_third"),
+            AnimationProfile.RESTRAINED_PULL_AWAY: (1.18, 1.0, 0.0, -5.0, "center"),
+        }[self.profile]
+        actual = (
+            self.scale_start,
+            self.scale_end,
+            self.horizontal_drift_pct,
+            self.vertical_drift_pct,
+            self.subject_anchor,
+        )
+        if actual != expected:
+            raise ValueError("animation profile parameters are server-fixed")
+        return self
+
+
+class VisualizationPreview(StrictModel):
+    """Server-owned metadata for a browser animation over a frozen JPEG."""
+
+    preview_id: str = Field(min_length=1, max_length=80)
+    job_id: str = Field(min_length=1, max_length=80)
+    recommendation_id: str = Field(min_length=1, max_length=80)
+    recommendation_status: ShotRecommendationStatus = ShotRecommendationStatus.SUGGESTED
+    title: str = Field(min_length=1, max_length=160)
+    cinematography_summary: str = Field(min_length=1, max_length=500)
+    story_purpose: str = Field(min_length=1, max_length=500)
+    visual_objective: str = Field(min_length=1, max_length=500)
+    why_now: str = Field(min_length=1, max_length=500)
+    manual_execution_guidance: str = Field(min_length=1, max_length=600)
+    safety_notes: str = Field(min_length=1, max_length=600)
+    duration_seconds: Literal[10]
+    animation_profile: AnimationProfile
+    profile_spec: AnimationProfileSpec | None = None
+    quality_status: VisualizationQualityStatus = VisualizationQualityStatus.PASS
+    quality_reasons: list[str] = Field(default_factory=list, max_length=5)
+    source_frame_available: bool
+    provenance: str = Field(min_length=1, max_length=40)
+    created_at: str = Field(min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def populate_profile_spec(self) -> "VisualizationPreview":
+        if self.profile_spec is not None:
+            if self.profile_spec.profile != self.animation_profile:
+                raise ValueError("profile spec must match animation profile")
+            return self
+        defaults = {
+            AnimationProfile.DESCENDING_REVEAL: AnimationProfileSpec(
+                profile=AnimationProfile.DESCENDING_REVEAL,
+                scale_start=1.0,
+                scale_end=1.25,
+                horizontal_drift_pct=0.0,
+                vertical_drift_pct=14.0,
+                subject_anchor="center",
+            ),
+            AnimationProfile.LATERAL_PARALLAX: AnimationProfileSpec(
+                profile=AnimationProfile.LATERAL_PARALLAX,
+                scale_start=1.08,
+                scale_end=1.08,
+                horizontal_drift_pct=12.0,
+                vertical_drift_pct=0.0,
+                subject_anchor="right_third",
+            ),
+            AnimationProfile.RESTRAINED_PULL_AWAY: AnimationProfileSpec(
+                profile=AnimationProfile.RESTRAINED_PULL_AWAY,
+                scale_start=1.18,
+                scale_end=1.0,
+                horizontal_drift_pct=0.0,
+                vertical_drift_pct=-5.0,
+                subject_anchor="center",
+            ),
+        }
+        object.__setattr__(self, "profile_spec", defaults[self.animation_profile])
+        return self
+
+    @field_validator("quality_reasons")
+    @classmethod
+    def validate_quality_reasons(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if not value or len(value) > 240:
+                raise ValueError("quality reasons must be between 1 and 240 characters")
+        return values
+
+
+class VisualizationJob(StrictModel):
+    job_id: str = Field(min_length=1, max_length=80)
+    request_fingerprint: str = Field(min_length=1, max_length=128)
+    duration_seconds: Literal[10]
+    variation_count: Literal[3]
+    story_version: int = Field(ge=0)
+    beat_id: str = Field(min_length=1, max_length=80)
+    observation_id: str = Field(min_length=1, max_length=100)
+    intent_version: int = Field(ge=0)
+    requested_at: str = Field(min_length=1, max_length=80)
+    started_at: str | None = Field(default=None, max_length=80)
+    completed_at: str | None = Field(default=None, max_length=80)
+    status: VisualizationJobStatus = VisualizationJobStatus.REQUESTED
+    provenance: str = Field(min_length=1, max_length=40)
+    source_kind: VisualizationSourceKind = VisualizationSourceKind.UNKNOWN
+    source_label: str = Field(default="unknown", min_length=1, max_length=80)
+    renderer_version: str = Field(default="unknown", min_length=1, max_length=80)
+    source_frame_sha256: str = Field(default="", max_length=64, pattern=r"^[0-9a-f]{64}$|^$")
+    source_width: int = Field(default=0, ge=0, le=8192)
+    source_height: int = Field(default=0, ge=0, le=8192)
+    source_frame_available: bool = False
+    previews: list[VisualizationPreview] = Field(default_factory=list, max_length=3)
+    error: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_ready_previews(self) -> "VisualizationJob":
+        if self.status == VisualizationJobStatus.READY and len(self.previews) != 3:
+            raise ValueError("ready visualization jobs must contain exactly three previews")
+        if self.status == VisualizationJobStatus.READY and not self.source_frame_available:
+            raise ValueError("ready visualization jobs must retain the source frame")
+        if self.status == VisualizationJobStatus.FAILED and (
+            self.previews or self.source_frame_available
+        ):
+            raise ValueError("failed visualization jobs cannot retain previews or source frames")
+        return self
 
 
 class StoryBeatRequest(StrictModel):

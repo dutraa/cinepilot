@@ -8,6 +8,7 @@ import json
 import threading
 import time
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 from domain import ALLOWED_SHOT_IDS, ALLOWED_STATUSES, SHOT_DEFINITIONS
@@ -25,6 +26,16 @@ from schemas import (
     StoryBeatStatus,
     StoryBrief,
     TweakStatus,
+    VisualizationJob,
+    VisualizationJobStatus,
+    VisualizationRequestInput,
+    VisualizationSourceKind,
+)
+from visualization import (
+    RENDERER_VERSION,
+    validate_rendered_previews,
+    validate_source_frame,
+    render_deterministic_previews,
 )
 
 
@@ -58,6 +69,13 @@ class AppState:
         self.latest_recommendations: list[ShotRecommendation] = []
         self.recommendation_history: list[ShotRecommendation] = []
         self.recommendation_decisions: list[dict[str, str]] = []
+        self.visualization_jobs: dict[str, VisualizationJob] = {}
+        self._visualization_job_order: list[str] = []
+        self._visualization_jobs_by_fingerprint: dict[str, str] = {}
+        self._visualization_frames: dict[str, bytes] = {}
+        self._visualization_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="cinepilot-visualization"
+        )
         self.provenance: dict[str, str] = {"mode": "live", "source": "unknown"}
         self.latest_critique: CinematicCritique | None = None
         self.critique_history: list[CinematicCritique] = []
@@ -145,6 +163,10 @@ class AppState:
             self.latest_recommendations = []
             self.recommendation_history = []
             self.recommendation_decisions = []
+            self.visualization_jobs = {}
+            self._visualization_job_order = []
+            self._visualization_jobs_by_fingerprint = {}
+            self._visualization_frames = {}
             self._last_recommendation_fingerprint = ""
             self.provenance["mode"] = provenance
             self._version += 1
@@ -358,6 +380,24 @@ class AppState:
                 raise InvalidDecisionError(
                     f"cannot change recommendation from {current.value} to {target.value}"
                 )
+            if target == ShotRecommendationStatus.SELECTED:
+                for job in self.visualization_jobs.values():
+                    if any(
+                        preview.recommendation_id == recommendation_id
+                        for preview in job.previews
+                    ) and any(
+                        preview.recommendation_id != recommendation_id
+                        and preview.recommendation_status == ShotRecommendationStatus.SELECTED
+                        for preview in job.previews
+                    ):
+                        self._record_story_rejection_locked(
+                            "visualization_selection",
+                            recommendation_id,
+                            "only one visualization preview can be selected per job",
+                        )
+                        raise InvalidDecisionError(
+                            "only one visualization preview can be selected per job"
+                        )
             if target == ShotRecommendationStatus.COMPLETED:
                 self._require_beat_locked(recommendation.beat_id)
                 if self.beat_statuses[recommendation.beat_id] in {
@@ -383,6 +423,7 @@ class AppState:
             if target == ShotRecommendationStatus.COMPLETED:
                 self.metrics["recommendations_completed"] += 1
                 self._complete_recommendation_locked(recommendation)
+            self._sync_visualization_preview_status_locked(recommendation)
             self._story_context_version += 1
             self._version += 1
             self._event_log.record(
@@ -392,6 +433,228 @@ class AppState:
                 provenance=recommendation.provenance,
             )
             return target
+
+    def _sync_visualization_preview_status_locked(
+        self, recommendation: ShotRecommendation
+    ) -> None:
+        for job in self.visualization_jobs.values():
+            for preview in job.previews:
+                if preview.recommendation_id == recommendation.recommendation_id:
+                    preview.recommendation_status = recommendation.status
+
+    @staticmethod
+    def _visualization_fingerprint(
+        context: dict[str, Any],
+        request: VisualizationRequestInput,
+        frame: bytes,
+        provenance: str,
+        source_kind: VisualizationSourceKind,
+        source_label: str,
+    ) -> str:
+        content = {
+            "context": context,
+            "request": request.model_dump(mode="json"),
+            "observation_frame_sha256": hashlib.sha256(frame).hexdigest(),
+            "provenance": provenance,
+            "source_kind": source_kind.value,
+            "source_label": source_label,
+        }
+        return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+    def request_visualization(
+        self,
+        request: VisualizationRequestInput,
+        source_frame: bytes,
+        provenance: str,
+        source_kind: VisualizationSourceKind | str = VisualizationSourceKind.UNKNOWN,
+        source_label: str | None = None,
+    ) -> VisualizationJob:
+        """Create one asynchronous visualization job for this session."""
+        try:
+            source_width, source_height = validate_source_frame(source_frame)
+        except ValueError as exc:
+            raise InvalidDecisionError(str(exc)) from exc
+        try:
+            normalized_source_kind = VisualizationSourceKind(source_kind)
+        except ValueError as exc:
+            raise InvalidDecisionError("visualization source kind is invalid") from exc
+        normalized_source_label = source_label or normalized_source_kind.value
+        with self._lock:
+            if self.story is None or self.active_beat_id is None:
+                raise InvalidDecisionError("current story observation is unavailable")
+            context = self._story_context_locked()
+            fingerprint = self._visualization_fingerprint(
+                context,
+                request,
+                source_frame,
+                provenance,
+                normalized_source_kind,
+                normalized_source_label,
+            )
+            existing_id = self._visualization_jobs_by_fingerprint.get(fingerprint)
+            if existing_id is not None:
+                existing = self.visualization_jobs[existing_id]
+                if existing.status == VisualizationJobStatus.FAILED:
+                    recommendations = [
+                        item.model_copy(deep=True) for item in self.latest_recommendations[:3]
+                    ]
+                    if len(recommendations) != 3:
+                        raise InvalidDecisionError(
+                            "three existing shot recommendations are required for visualization"
+                        )
+                    existing.status = VisualizationJobStatus.REQUESTED
+                    existing.started_at = None
+                    existing.completed_at = None
+                    existing.error = None
+                    existing.source_frame_available = True
+                    existing.source_frame_sha256 = hashlib.sha256(source_frame).hexdigest()
+                    existing.source_kind = normalized_source_kind
+                    existing.source_label = normalized_source_label
+                    existing.renderer_version = RENDERER_VERSION
+                    existing.source_width = source_width
+                    existing.source_height = source_height
+                    existing.previews = []
+                    self._visualization_frames[existing_id] = bytes(source_frame)
+                    self._version += 1
+                    self._event_log.record("visualization_retry", job_id=existing_id)
+                    self._visualization_executor.submit(
+                        self._render_visualization_job,
+                        existing_id,
+                        request,
+                        recommendations,
+                    )
+                return copy.deepcopy(existing)
+
+            if self._visualization_job_order:
+                active = self.visualization_jobs[self._visualization_job_order[-1]]
+                if active.status in {
+                    VisualizationJobStatus.REQUESTED,
+                    VisualizationJobStatus.RENDERING,
+                }:
+                    raise InvalidDecisionError("another visualization job is rendering")
+
+            recommendations = [
+                item.model_copy(deep=True) for item in self.latest_recommendations[:3]
+            ]
+            if len(recommendations) != 3:
+                raise InvalidDecisionError(
+                    "three existing shot recommendations are required for visualization"
+                )
+            job_id = str(uuid4())
+            observation_id = str(uuid4())
+            requested_at = self._now_iso()
+            job = VisualizationJob(
+                job_id=job_id,
+                request_fingerprint=fingerprint,
+                duration_seconds=10,
+                variation_count=3,
+                story_version=self._story_version,
+                beat_id=self.active_beat_id,
+                observation_id=observation_id,
+                intent_version=self._intent_version,
+                requested_at=requested_at,
+                status=VisualizationJobStatus.REQUESTED,
+                provenance=provenance,
+                source_kind=normalized_source_kind,
+                source_label=normalized_source_label,
+                renderer_version=RENDERER_VERSION,
+                source_frame_sha256=hashlib.sha256(source_frame).hexdigest(),
+                source_width=source_width,
+                source_height=source_height,
+                source_frame_available=True,
+            )
+            self.visualization_jobs[job_id] = job
+            self._visualization_job_order.append(job_id)
+            self._visualization_jobs_by_fingerprint[fingerprint] = job_id
+            self._visualization_frames[job_id] = bytes(source_frame)
+            self._version += 1
+            self._event_log.record(
+                "visualization_requested",
+                job_id=job_id,
+                observation_id=observation_id,
+                story_version=self._story_version,
+                beat_id=self.active_beat_id,
+                provenance=provenance,
+            )
+            self._visualization_executor.submit(
+                self._render_visualization_job,
+                job_id,
+                request,
+                recommendations,
+            )
+            return copy.deepcopy(job)
+
+    def _render_visualization_job(
+        self,
+        job_id: str,
+        request: VisualizationRequestInput,
+        recommendations: list[ShotRecommendation],
+    ) -> None:
+        with self._lock:
+            job = self.visualization_jobs.get(job_id)
+            if job is None:
+                return
+            job.status = VisualizationJobStatus.RENDERING
+            job.started_at = self._now_iso()
+            self._version += 1
+            self._event_log.record("visualization_rendering", job_id=job_id)
+            job_copy = job.model_copy(deep=True)
+        try:
+            previews = validate_rendered_previews(
+                job_id,
+                render_deterministic_previews(job_copy, request, recommendations),
+                recommendations,
+            )
+        except Exception as exc:  # noqa: BLE001
+            with self._lock:
+                job = self.visualization_jobs.get(job_id)
+                if job is None:
+                    return
+                job.status = VisualizationJobStatus.FAILED
+                job.completed_at = self._now_iso()
+                job.error = str(exc)[:500] or "visualization renderer failed"
+                job.source_frame_available = False
+                job.previews = []
+                self._visualization_frames.pop(job_id, None)
+                self._version += 1
+                self._event_log.record(
+                    "visualization_failed", job_id=job_id, reason=job.error
+                )
+            return
+        with self._lock:
+            job = self.visualization_jobs.get(job_id)
+            if job is None:
+                return
+            job.status = VisualizationJobStatus.READY
+            job.completed_at = self._now_iso()
+            job.previews = previews
+            self._version += 1
+            self._event_log.record(
+                "visualization_ready",
+                job_id=job_id,
+                preview_ids=[preview.preview_id for preview in previews],
+                provenance=job.provenance,
+            )
+            self._evict_visualizations_locked()
+
+    def _evict_visualizations_locked(self) -> None:
+        while len(self._visualization_job_order) > 10:
+            evicted_id = self._visualization_job_order.pop(0)
+            self.visualization_jobs.pop(evicted_id, None)
+            self._visualization_frames.pop(evicted_id, None)
+            for fingerprint, job_id in list(self._visualization_jobs_by_fingerprint.items()):
+                if job_id == evicted_id:
+                    del self._visualization_jobs_by_fingerprint[fingerprint]
+            self._event_log.record("visualization_evicted", job_id=evicted_id)
+
+    def get_visualization_source_frame(self, job_id: str) -> bytes:
+        with self._lock:
+            if job_id not in self.visualization_jobs:
+                raise StateNotFoundError(f"visualization job not found: {job_id}")
+            frame = self._visualization_frames.get(job_id)
+            if frame is None:
+                raise InvalidDecisionError("visualization source frame is unavailable")
+            return bytes(frame)
 
     def _complete_recommendation_locked(self, recommendation: ShotRecommendation) -> None:
         beat_id = recommendation.beat_id
@@ -558,6 +821,17 @@ class AppState:
                 "latest_recommendations": [item.model_dump(mode="json") for item in self.latest_recommendations],
                 "recommendation_history": [item.model_dump(mode="json") for item in self.recommendation_history],
                 "recommendation_decisions": copy.deepcopy(self.recommendation_decisions),
+                "visualization_jobs": [
+                    self.visualization_jobs[job_id].model_dump(mode="json")
+                    for job_id in self._visualization_job_order
+                    if job_id in self.visualization_jobs
+                ],
+                "latest_visualization_job": (
+                    self.visualization_jobs[self._visualization_job_order[-1]].model_dump(mode="json")
+                    if self._visualization_job_order
+                    and self._visualization_job_order[-1] in self.visualization_jobs
+                    else None
+                ),
                 "provenance": dict(self.provenance),
                 "latest_critique": self.latest_critique.model_dump(mode="json") if self.latest_critique else None,
                 "critique_history": [item.model_dump(mode="json") for item in self.critique_history],

@@ -68,6 +68,14 @@ flowchart LR
 
 The story-aware dashboard now answers: what beat are we in, what did the current shot prove, what is missing, and which next shot can advance the story. Deterministic fixture behavior is labeled separately from live Gemini behavior.
 
+The story-first dashboard also includes an advisory Visualize panel. With a
+synthetic, prerecorded, webcam, RTSP, or RTMP source, the creator can freeze the
+latest real-place frame, request exactly three fixed 10-second concept
+animations, select one, and receive a manual capture brief. The response shows
+source provenance, snapshot dimensions, renderer version, and render-quality
+notes. The concepts are illustrative 2D references, not flight truth, obstacle
+maps, spatial reconstruction, or evidence that the captured shot improved.
+
 ## Quick Start
 
 ### Prerequisites
@@ -171,6 +179,10 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode â€
 | `GET /api/recommendations` | Return latest recommendations and history. |
 | `POST /api/recommendations` | Publish a validated manual recommendation batch. |
 | `POST /api/recommendations/{id}/decision` | Select, complete, or dismiss a recommendation. |
+| `POST /api/visualizations` | Request exactly three deterministic 10-second concepts for the current story context and frozen source observation. |
+| `GET /api/visualizations` | List bounded session-local visualization jobs. |
+| `GET /api/visualizations/{job_id}` | Return one visualization job and its linked previews. |
+| `GET /api/visualizations/{job_id}/source-frame` | Return the server-frozen JPEG for browser animation while the bounded session job is retained. |
 | `GET /health` | JSON system status: video source, Gemini/Grafana status, frames sent. |
 
 ## Project Structure

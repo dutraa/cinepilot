@@ -100,6 +100,39 @@ Recommendations use `suggested -> selected -> completed`, with dismissal from
 suggested or selected. Completion records capture and advances coverage; it is
 not an evaluation that the resulting shot improved.
 
+## Visualization contracts and API
+
+The Visualize slice accepts only the exact body
+`{"duration_seconds": 10, "variation_count": 3}`. The server decodes and
+freezes the latest available frame, or the seeded synthetic scene when
+deterministic demo mode has no live frame, and creates one session-local job
+with status `requested -> rendering -> ready|failed`. A repeated fingerprint
+returns the existing job; an invalid observation or a different observation
+while a job is active returns `409`.
+
+Each ready job contains exactly three previews linked one-to-one with existing
+`ShotRecommendation` records. The fixed profiles are `descending_reveal`,
+`lateral_parallax`, and `restrained_pull_away`. They are browser animations over
+the frozen JPEG, not executable camera or flight instructions. Each response
+also exposes the server-owned source kind, label, dimensions, SHA-256 snapshot
+hash, renderer version, profile specification, and render quality status. A
+quality pass means the preview contract is valid; it does not mean spatial
+accuracy or obstacle awareness. The existing recommendation decision route is
+the only selection lifecycle; at most one preview in a job may be selected at
+once. Selecting a preview exposes the manual brief but does not complete
+coverage or prove that a resulting shot improved.
+
+The routes are `POST /api/visualizations`, `GET /api/visualizations`,
+`GET /api/visualizations/{job_id}`, and
+`GET /api/visualizations/{job_id}/source-frame`. Visualization jobs and linked
+preview statuses are included in `/api/state` and `/events`. Unknown fields,
+client-owned IDs/statuses/timestamps/assets, invalid payloads, unknown jobs, and
+conflicting observations are rejected at the API boundary with `422`, `404`,
+or `409` as appropriate. A failed job may be retried with the same request and
+job fingerprint; the server reuses the job ID and clears the failed attempt
+before rendering again. The deterministic renderer is behind a provider-neutral
+renderer interface; no live video-generation provider is enabled by default.
+
 ## Story-aware API
 
 `GET /api/story`, `POST /api/story/beat`, `GET /api/coverage`,
@@ -133,3 +166,4 @@ story, coverage, recommendation, and provenance fields.
 - Event-log failures are logged but do not stop the live loop.
 - Missing Gemini credentials leave the shell usable and report a visible disconnected state.
 - No safety-critical flight advice is presented as an automated command or guarantee.
+- Visualize concepts are labeled `AI visualization — illustrative creative reference, not flight truth.` and retain deterministic/live-source provenance separately.

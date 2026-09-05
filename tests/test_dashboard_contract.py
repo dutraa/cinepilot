@@ -19,8 +19,17 @@ def test_dashboard_contains_story_coverage_decision_surface() -> None:
         "coveragePanel",
         "recommendationPanel",
         "provenancePill",
+        "visualizationPanel",
+        "visualizeBtn",
+        "visualizationStatus",
     ]:
         assert f'id="{element_id}"' in html
     assert "/api/recommendations/" in html
+    assert "/api/visualizations" in html
+    assert "AI visualization — illustrative creative reference, not flight truth." in html
+    assert "duration_seconds:10, variation_count:3" in html
+    assert "renderer_version" in html
+    assert "quality_status" in html
+    assert "source_frame_available" in html
     assert "textContent" in html
     assert "EventSource(\"/events\")" in html

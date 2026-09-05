@@ -23,7 +23,7 @@ VideoStreamManager
   -> Gemini Live session or deterministic demo provider
   -> validated critique/recommendation tool
   -> Pydantic validation
-  -> AppState publication, story coverage, and deduplication
+  -> AppState publication, story coverage, visualization jobs, and deduplication
   -> EventLog / Grafana
   -> SSE and /api/state
   -> critique and coverage UI
@@ -55,6 +55,19 @@ Server-owned critique fields are critique ID, tweak ID, observation ID, timestam
 
 The story-aware slice adds `StoryBrief`, `StoryBeat`, `ShotCoverage`, and `ShotRecommendation`. A recommendation must include the story purpose, visual objective, why-now explanation, manual execution guidance, and safety notes. Story and recommendation status are server-owned. See `docs/SPEC.md` for the reference contract and `docs/decisions/ADR-001-story-aware-demo-boundary.md` for the boundary decision.
 
+The Visualize slice adds strict `VisualizationRequestInput`,
+`VisualizationJobStatus`, `VisualizationQualityStatus`,
+`VisualizationSourceKind`, `AnimationProfile`, `AnimationProfileSpec`,
+`VisualizationPreview`, and `VisualizationJob` contracts. A single in-process
+worker captures one decodeable, session-local observation snapshot and produces
+exactly three browser-playable 10-second animations over that JPEG. The
+deterministic renderer implements the provider-neutral `VisualizationRenderer`
+boundary; provider output must pass the same validation before it can become
+ready state. The server owns every job, observation hash, preview, timestamp,
+status, recommendation link, version, source label, and provenance. The preview
+attaches to an existing recommendation; it does not introduce a second
+decision state machine.
+
 ## Failure behavior
 
 - Gemini disconnect: preserve the current intent and resend it after reconnect.
@@ -67,9 +80,14 @@ The story-aware slice adds `StoryBrief`, `StoryBeat`, `ShotCoverage`, and `ShotR
 - Unknown story beat or recommendation: return HTTP 404; illegal story or recommendation transitions return HTTP 409.
 - Event-log failure: log the failure but keep the live director running.
 - Source failure: retain the existing synthetic fallback, but expose the active source visibly.
+- Visualization renderer failure: mark only the job failed, remove its temporary source frame, and leave story, recommendation, and coverage state unchanged; a retry reuses the failed job ID and is still bounded by the one-worker rule.
+- Visualization selection: reuse recommendation transitions; selection exposes a manual capture brief but never marks capture, coverage, or quality improvement.
 
 ## Deliberate simplifications
 
 State is session-local and history is capped. The JSONL event log is sufficient for the first evidence run; a database is deferred until multiple users or persistent projects exist.
 
 The first story demo uses one `DirectorAgent`, one seeded story, five beats, a deterministic provider, and manual creator selection. Specialist agents, autonomous flight, screenplay parsing, and editing integrations remain out of scope until recommendation usefulness is evidenced.
+
+Visualization persistence, galleries, live video generation, 3D reconstruction,
+and autonomous drone behavior remain out of scope for the deterministic release.

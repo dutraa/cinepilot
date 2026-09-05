@@ -14,7 +14,8 @@
   .header-right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .pill { border:1px solid var(--edge); border-radius:999px; padding:6px 11px; color:var(--dim); font-size:.72rem; font-weight:700; letter-spacing:.4px; }
   .pill.on { color:var(--green); border-color:#356d50; } .pill.warn { color:var(--yellow); border-color:#705e32; } .pill.off { color:var(--red); border-color:#743b42; }
-  button { border:0; border-radius:7px; background:var(--accent); color:#071018; cursor:pointer; font:inherit; font-size:.75rem; font-weight:750; padding:8px 11px; }
+  button { min-height:44px; border:0; border-radius:7px; background:var(--accent); color:#071018; cursor:pointer; font:inherit; font-size:.75rem; font-weight:750; padding:8px 11px; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   button.secondary { background:transparent; color:var(--dim); border:1px solid var(--edge); } button:disabled { cursor:wait; opacity:.55; }
   #muteBtn { background:var(--panel); color:var(--text); border:1px solid var(--edge); }
   .layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(340px,1fr); gap:18px; margin-top:18px; }
@@ -37,10 +38,18 @@
   .rec-head { display:flex; justify-content:space-between; align-items:start; gap:10px; } .rec-title { font-size:.95rem; font-weight:750; } .status { color:var(--dim); font-size:.64rem; letter-spacing:.9px; text-transform:uppercase; white-space:nowrap; }
   .rec-section { margin-top:9px; } .rec-label { color:var(--dim); font-size:.64rem; font-weight:800; letter-spacing:.8px; text-transform:uppercase; } .rec-text { font-size:.79rem; line-height:1.42; margin-top:3px; }
   .rec-actions { display:flex; gap:6px; margin-top:11px; flex-wrap:wrap; } .rec-actions button { font-size:.68rem; padding:6px 9px; }
+  .visualize-action { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px; } .visualize-action p { color:var(--dim); font-size:.78rem; line-height:1.4; }
+  .visualizations { padding:14px; display:grid; gap:12px; } .visualization-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .visualization-card { min-width:0; border:1px solid var(--edge); border-radius:9px; padding:10px; background:#ffffff04; } .visualization-card.selected { border-color:var(--yellow); } .visualization-card.dismissed { opacity:.62; }
+  .concept-stage { overflow:hidden; border-radius:7px; background:#000; aspect-ratio:16/9; } .concept-stage img { width:100%; height:100%; object-fit:cover; display:block; transform-origin:center; }
+  .concept-stage img.descending-reveal { animation:descendingReveal 10s ease-in-out 1 both; } .concept-stage img.lateral-parallax { animation:lateralParallax 10s ease-in-out 1 both; } .concept-stage img.restrained-pull-away { animation:restrainedPullAway 10s ease-in-out 1 both; }
+  @keyframes descendingReveal { from { transform:scale(1) translateY(-7%); } to { transform:scale(1.25) translateY(7%); } } @keyframes lateralParallax { from { transform:scale(1.08) translateX(-6%); } to { transform:scale(1.08) translateX(6%); } } @keyframes restrainedPullAway { from { transform:scale(1.18) translateY(3%); } to { transform:scale(1) translateY(-2%); } }
+  .visualization-copy { min-width:0; overflow-wrap:anywhere; font-size:.76rem; line-height:1.4; } .visualization-copy .rec-label { margin-top:8px; } .visualization-notice { color:var(--yellow); font-size:.73rem; line-height:1.4; } .manual-brief { border:1px solid #705e32; border-radius:9px; padding:12px; background:#f3c9690d; } .manual-brief h3 { font-size:.86rem; } .manual-brief p { color:var(--dim); font-size:.76rem; line-height:1.45; margin-top:6px; }
   .empty,.error,.stale { color:var(--dim); font-size:.8rem; line-height:1.5; padding:14px; } .error { color:var(--red); } .stale { color:var(--yellow); }
   .intent-form { padding:14px; display:grid; gap:8px; } label { color:var(--dim); font-size:.66rem; font-weight:800; letter-spacing:.9px; text-transform:uppercase; } input,textarea { width:100%; border:1px solid var(--edge); border-radius:7px; background:#0d1119; color:var(--text); font:inherit; font-size:.8rem; padding:8px 9px; } textarea { resize:vertical; }
   .intent-status { min-height:1em; color:var(--dim); font-size:.72rem; } .critique { padding:14px; } .critique-summary { font-size:.86rem; line-height:1.45; } .tweak-card { border-top:1px solid var(--edge); margin-top:10px; padding-top:10px; } .tweak-meta { color:var(--dim); font-size:.65rem; text-transform:uppercase; } .tweak-copy { font-size:.78rem; line-height:1.4; margin-top:6px; } .tweak-rationale { color:var(--dim); font-size:.75rem; margin-top:5px; }
   .shot-list { display:grid; gap:8px; padding:12px; } .shot { border:1px solid var(--edge); border-radius:8px; padding:9px; } .shot-head { display:flex; justify-content:space-between; gap:8px; font-size:.77rem; font-weight:700; } .shot-feedback { color:var(--dim); font-size:.72rem; line-height:1.4; margin-top:5px; }
+  @media (prefers-reduced-motion:reduce) { .concept-stage img { animation:none !important; transform:none !important; } }
   @media (max-width:980px) { .layout { grid-template-columns:1fr; } } @media (max-width:620px) { body { padding:12px; } .two-col { grid-template-columns:1fr; } .beat-rail { grid-template-columns:1fr 1fr; } .header-right { margin-left:0; } }
 </style>
 </head>
@@ -58,7 +67,8 @@
     <div class="panel"><div class="panel-title">1 · Story and active beat</div><div class="story"><h1 id="storyTitle">Loading story...</h1><p id="storyLogline" class="story-logline">Loading the seeded story brief.</p><div class="meta-row"><span id="storyVersion" class="meta">Story v—</span><span id="modeMeta" class="meta">Mode: —</span><span id="sourceMeta" class="meta">Source: —</span></div><div id="activeBeat" class="active-beat"><div class="eyebrow">Active beat</div><h2 id="activeBeatTitle">Waiting for story state</h2><p id="activeBeatCopy">The active story beat will appear here.</p></div><div id="beatRail" class="beat-rail"></div></div></div>
     <div class="panel"><div class="panel-title">2 · What the current shot proves</div><div class="two-col"><div id="currentShotContribution" class="subpanel"><div class="eyebrow">Observed contribution</div><p id="contributionText">Waiting for the current shot observation.</p></div><div class="subpanel"><div class="eyebrow">What it does not prove</div><p id="contributionLimitations">Waiting for coverage limits.</p></div></div></div>
     <div id="coveragePanel" class="panel"><div class="panel-title">3 · Coverage state</div><div class="two-col"><div class="subpanel"><h3>Covered proof</h3><ul id="coveredCoverage" class="list"><li>Loading coverage...</li></ul></div><div class="subpanel"><h3>Missing coverage</h3><ul id="missingCoverage" class="list"><li>Loading missing beats...</li></ul></div></div></div>
-    <div class="panel"><div class="panel-title">4 · Possible next shots · creator chooses manually</div><div id="recommendationPanel" class="recommendations"><div class="empty">Loading recommendations...</div></div></div>
+    <div id="visualizationPanel" class="panel"><div class="panel-title">4 · Visualize this place · illustrative reference</div><div class="visualize-action"><p id="visualizationActionCopy">Freeze the latest available place frame and request three fixed 10-second concepts for the active beat and current shot.</p><button id="visualizeBtn" type="button">Visualize this place</button></div><div id="visualizationStatus" class="visualizations" aria-live="polite" aria-atomic="true"><div class="empty">No visualization requested yet.</div></div></div>
+    <div class="panel"><div class="panel-title">5 · Possible next shots · creator chooses manually</div><div id="recommendationPanel" class="recommendations"><div class="empty">Loading recommendations...</div></div></div>
   </section>
 
   <aside class="stack">
@@ -81,16 +91,116 @@
   byId("muteBtn").addEventListener("click", function () { muted = !muted; text(this, muted ? "Unmute Audio Guidance" : "Mute Audio Guidance"); if (muted && window.speechSynthesis) window.speechSynthesis.cancel(); });
   function renderStory(state) { var story = state.story; if (!story) { text(byId("storyTitle"), "No story loaded"); return; } text(byId("storyTitle"), story.title); text(byId("storyLogline"), story.logline); text(byId("storyVersion"), "Story v" + state.story_version); text(byId("modeMeta"), "Mode: " + state.provenance.mode); text(byId("sourceMeta"), "Source: " + state.provenance.source); var active = state.active_beat; text(byId("activeBeatTitle"), active ? active.title : "No active beat"); text(byId("activeBeatCopy"), active ? active.story_job + " Required proof: " + active.required_visual_proof : "The story is complete or awaiting a beat."); var rail = byId("beatRail"); rail.textContent = ""; (state.beats || []).forEach(function (beat, index) { var card = document.createElement("div"); card.className = "beat " + beat.status; addText(card, "div", "beat-number", "0" + (index + 1)); addText(card, "div", "beat-title", beat.title); addText(card, "div", "beat-status", beat.status); rail.appendChild(card); }); }
   function renderCoverage(state) { var contribution = state.current_shot_contribution || {}; text(byId("contributionText"), contribution.proves || "No current shot contribution recorded."); text(byId("contributionLimitations"), contribution.limitations || "No limitations recorded."); var covered = byId("coveredCoverage"), missing = byId("missingCoverage"); covered.textContent = ""; missing.textContent = ""; (state.covered_coverage || []).forEach(function (item) { listItem(covered, item.shot_title + " — " + item.notes); }); if (!covered.firstChild) listItem(covered, "No captured proof yet."); (state.missing_coverage || []).forEach(function (beat) { listItem(missing, beat.title + " — " + beat.required_visual_proof); }); if (!missing.firstChild) listItem(missing, "All beats covered or skipped."); }
+  function visualizationSection(parent, label, value) { var section = document.createElement("div"); section.className = "visualization-copy"; addText(section, "div", "rec-label", label); addText(section, "div", "", value); parent.appendChild(section); }
+  function renderManualBrief(parent, preview) { var brief = document.createElement("div"); brief.className = "manual-brief"; addText(brief, "h3", "", "Manual capture brief · selected reference only"); addText(brief, "p", "", "Selection is not capture, coverage completion, or proof that the resulting shot improved."); visualizationSection(brief, "Story purpose", preview.story_purpose); visualizationSection(brief, "Visual objective", preview.visual_objective); visualizationSection(brief, "Why now", preview.why_now); visualizationSection(brief, "Manual guidance", preview.manual_execution_guidance); visualizationSection(brief, "Safety notes", preview.safety_notes); parent.appendChild(brief); }
+  function renderVisualizations(state) {
+    var panel = byId("visualizationStatus"), button = byId("visualizeBtn");
+    var job = state.latest_visualization_job;
+    var provenance = state.provenance || {};
+    var source = provenance.source || "unknown";
+    var hasSource = source !== "unknown" && source !== "none";
+    panel.textContent = "";
+    if (!hasSource) {
+      addText(panel, "div", "visualization-notice", "Source disconnected: a current frame is not available.");
+    }
+    if (!job) {
+      addText(panel, "div", "empty", "No visualization requested yet. Request concepts during a safe hover or after a short evidence burst.");
+      button.disabled = !hasSource;
+      return;
+    }
+    if (job.status === "requested" || job.status === "rendering") {
+      addText(panel, "div", "stale", "Rendering exactly three 10-second concepts over the frozen observation…");
+      addText(panel, "div", "visualization-notice", "The source frame is frozen for this job; continue only with manual flight judgment.");
+      button.disabled = true;
+      return;
+    }
+    if (job.status === "failed") {
+      addText(panel, "div", "error", "Visualization failed: " + (job.error || "renderer unavailable"));
+      var retry = document.createElement("button");
+      retry.type = "button";
+      text(retry, "Retry visualization");
+      retry.addEventListener("click", requestVisualizations);
+      panel.appendChild(retry);
+      button.disabled = !hasSource;
+      return;
+    }
+    if (!job.source_frame_available || !Array.isArray(job.previews) || job.previews.length !== 3) {
+      addText(panel, "div", "error", "The visualization response is incomplete; no preview was presented as ready.");
+      button.disabled = !hasSource;
+      return;
+    }
+    addText(panel, "div", "visualization-notice", "AI visualization — illustrative creative reference, not flight truth.");
+    addText(panel, "div", "muted", "Renderer: " + (job.renderer_version || job.provenance || "unknown") + " · Source: " + (job.source_kind || provenance.mode || "unknown") + " / " + (job.source_label || source) + " · Frozen frame: " + (job.source_width || "?") + "×" + (job.source_height || "?") + " · Duration: 10 seconds");
+    var grid = document.createElement("div");
+    grid.className = "visualization-grid";
+    var selected = null;
+    job.previews.forEach(function (preview) {
+      var card = document.createElement("article");
+      card.className = "visualization-card " + preview.recommendation_status;
+      var stage = document.createElement("div");
+      stage.className = "concept-stage";
+      var image = document.createElement("img");
+      image.src = "/api/visualizations/" + encodeURIComponent(job.job_id) + "/source-frame";
+      image.alt = "Frozen source frame for " + preview.title;
+      image.className = preview.animation_profile;
+      stage.appendChild(image);
+      card.appendChild(stage);
+      addText(card, "h3", "rec-title", preview.title);
+      visualizationSection(card, "Animation", preview.cinematography_summary);
+      visualizationSection(card, "Story purpose", preview.story_purpose);
+      visualizationSection(card, "Visual objective", preview.visual_objective);
+      visualizationSection(card, "Why now", preview.why_now);
+      visualizationSection(card, "Manual guidance", preview.manual_execution_guidance);
+      visualizationSection(card, "Safety notes", preview.safety_notes);
+      var quality = (preview.quality_status || "pass").toUpperCase();
+      addText(card, "div", "status", "Quality: " + quality + " · Status: " + preview.recommendation_status + " · 10 seconds");
+      if (preview.quality_reasons && preview.quality_reasons.length) {
+        visualizationSection(card, "Quality notes", preview.quality_reasons.join("; "));
+      }
+      var actions = document.createElement("div");
+      actions.className = "rec-actions";
+      if (preview.recommendation_status === "suggested") {
+        var select = document.createElement("button");
+        select.type = "button";
+        text(select, "Select");
+        select.addEventListener("click", function () { select.disabled = true; decideRecommendation(preview.recommendation_id, "selected"); });
+        actions.appendChild(select);
+        var dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.className = "secondary";
+        text(dismiss, "Dismiss");
+        dismiss.addEventListener("click", function () { dismiss.disabled = true; decideRecommendation(preview.recommendation_id, "dismissed"); });
+        actions.appendChild(dismiss);
+      }
+      if (preview.recommendation_status === "selected") {
+        var selectedDismiss = document.createElement("button");
+        selectedDismiss.type = "button";
+        selectedDismiss.className = "secondary";
+        text(selectedDismiss, "Dismiss");
+        selectedDismiss.addEventListener("click", function () { selectedDismiss.disabled = true; decideRecommendation(preview.recommendation_id, "dismissed"); });
+        actions.appendChild(selectedDismiss);
+        card.classList.add("selected");
+        selected = preview;
+      }
+      if (actions.firstChild) card.appendChild(actions);
+      grid.appendChild(card);
+    });
+    panel.appendChild(grid);
+    if (selected) renderManualBrief(panel, selected);
+    button.disabled = !hasSource;
+  }
   function recSection(card, label, value) { var section = document.createElement("div"); section.className = "rec-section"; addText(section, "div", "rec-label", label); addText(section, "div", "rec-text", value); card.appendChild(section); }
   function decideRecommendation(id, decision) { var status = byId("intentStatus"); text(status, "Saving " + decision + " decision..."); return fetch("/api/recommendations/" + encodeURIComponent(id) + "/decision", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ decision:decision }) }).then(function (response) { if (!response.ok) throw new Error("Recommendation decision was not accepted"); text(status, "Decision saved. The server state is updating."); }).catch(function (error) { text(status, error.message); }); }
   function renderRecommendations(items) { var panel = byId("recommendationPanel"); panel.textContent = ""; if (!items || !items.length) { addText(panel, "div", "empty", "No next-shot recommendations yet. The director is waiting for story-aware coverage guidance."); return; } items.forEach(function (rec) { var card = document.createElement("article"); card.className = "recommendation " + rec.status; var head = document.createElement("div"); head.className = "rec-head"; addText(head, "div", "rec-title", rec.title); addText(head, "div", "status", rec.status); card.appendChild(head); recSection(card, "Advances", rec.beat_id); recSection(card, "Story purpose", rec.story_purpose); recSection(card, "Visual objective", rec.visual_objective); recSection(card, "Why now", rec.why_now); recSection(card, "Manual attempt", rec.execution_guidance); recSection(card, "Safety notes", rec.safety_notes); if (rec.confidence != null) recSection(card, "Confidence", Math.round(rec.confidence * 100) + "%"); var actions = document.createElement("div"); actions.className = "rec-actions"; function action(label, value, secondary) { var button = document.createElement("button"); button.type = "button"; button.className = secondary ? "secondary" : ""; text(button, label); button.addEventListener("click", function () { button.disabled = true; decideRecommendation(rec.recommendation_id, value); }); actions.appendChild(button); } if (rec.status === "suggested") { action("Select", "selected", false); action("Dismiss", "dismissed", true); } if (rec.status === "selected") { action("Complete capture", "completed", false); action("Dismiss", "dismissed", true); } if (actions.firstChild) card.appendChild(actions); panel.appendChild(card); }); }
   function decideTweak(critiqueId, tweakId, decision) { fetch("/api/critiques/" + encodeURIComponent(critiqueId) + "/tweaks/" + encodeURIComponent(tweakId) + "/decision", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ decision:decision }) }).catch(function () { text(byId("intentStatus"), "Critique decision was not accepted"); }); }
   function renderCritique(critique) { var panel = byId("critiquePanel"); panel.textContent = ""; if (!critique) { addText(panel, "div", "empty", "The current-shot critique remains available when Gemini publishes one."); return; } addText(panel, "div", "critique-summary", critique.summary); (critique.tweaks || []).forEach(function (tweak) { var card = document.createElement("div"); card.className = "tweak-card"; addText(card, "div", "tweak-meta", tweak.category + " · " + tweak.priority + " · " + tweak.status); addText(card, "div", "tweak-copy", tweak.diagnosis); addText(card, "div", "tweak-copy", tweak.recommendation); addText(card, "div", "tweak-rationale", tweak.rationale); if (tweak.status === "PROPOSED" || tweak.status === "ACCEPTED") { var actions = document.createElement("div"); actions.className = "rec-actions"; ["accepted", "acted", "dismissed"].forEach(function (decision) { var button = document.createElement("button"); button.type = "button"; button.className = decision === "acted" ? "" : "secondary"; text(button, decision); button.addEventListener("click", function () { decideTweak(critique.critique_id, tweak.tweak_id, decision); }); actions.appendChild(button); }); card.appendChild(actions); } panel.appendChild(card); }); }
   function renderShots(shots) { var panel = byId("shotList"); panel.textContent = ""; Object.keys(shots || {}).forEach(function (id) { var shot = shots[id], card = document.createElement("div"); card.className = "shot"; var head = document.createElement("div"); head.className = "shot-head"; addText(head, "span", "", shot.title); addText(head, "span", "status", shot.status); card.appendChild(head); addText(card, "div", "shot-feedback", shot.feedback); panel.appendChild(card); }); if (!panel.firstChild) addText(panel, "div", "empty", "No shot list state."); }
-  function renderState(state) { lastEventAt = Date.now(); setPill("connectionStatus", "State: live", "on"); renderStory(state); renderCoverage(state); renderRecommendations(state.latest_recommendations); renderCritique(state.latest_critique); renderShots(state.shots); var metrics = state.metrics || {}; text(byId("fpsVal"), Number(metrics.fps || 0).toFixed(1)); text(byId("latencyVal"), Math.round(metrics.latency_ms || 0)); text(byId("framesVal"), metrics.frames_sent || 0); var provenance = state.provenance || {}; setPill("provenancePill", "Mode: " + (provenance.mode || "unknown"), provenance.mode === "deterministic_demo" ? "on" : ""); setPill("sourcePill", "Source: " + (provenance.source || "unknown"), ""); var gemini = metrics.gemini_status || "Unknown"; setPill("geminiPill", "Gemini: " + gemini, gemini === "Connected" ? "on" : (gemini === "Disconnected" || gemini === "No API Key" ? "off" : "warn")); setPill("grafanaPill", "Grafana: " + (metrics.grafana_status || "Unknown"), metrics.grafana_status === "Live" ? "on" : "warn"); }
+  function renderState(state) { lastEventAt = Date.now(); setPill("connectionStatus", "State: live", "on"); renderStory(state); renderCoverage(state); renderVisualizations(state); renderRecommendations(state.latest_recommendations); renderCritique(state.latest_critique); renderShots(state.shots); var metrics = state.metrics || {}; text(byId("fpsVal"), Number(metrics.fps || 0).toFixed(1)); text(byId("latencyVal"), Math.round(metrics.latency_ms || 0)); text(byId("framesVal"), metrics.frames_sent || 0); var provenance = state.provenance || {}; setPill("provenancePill", "Mode: " + (provenance.mode || "unknown"), provenance.mode === "deterministic_demo" ? "on" : ""); setPill("sourcePill", "Source: " + (provenance.source || "unknown"), ""); var gemini = metrics.gemini_status || "Unknown"; setPill("geminiPill", "Gemini: " + gemini, gemini === "Connected" ? "on" : (gemini === "Disconnected" || gemini === "No API Key" ? "off" : "warn")); setPill("grafanaPill", "Grafana: " + (metrics.grafana_status || "Unknown"), metrics.grafana_status === "Live" ? "on" : "warn"); }
   function loadState() { fetch("/api/state").then(function (response) { if (!response.ok) throw new Error("Could not load state"); return response.json(); }).then(renderState).catch(function (error) { setPill("connectionStatus", "State: error", "off"); var panel = byId("recommendationPanel"); panel.textContent = ""; addText(panel, "div", "error", error.message); }); }
   var events = new EventSource("/events"); events.onmessage = function (event) { try { renderState(JSON.parse(event.data)); } catch (error) { setPill("connectionStatus", "State: error", "off"); } }; events.onerror = function () { setPill("connectionStatus", "State: disconnected", "off"); };
   window.setInterval(function () { if (lastEventAt && Date.now() - lastEventAt > 3000) setPill("connectionStatus", "State: stale", "warn"); }, 1000);
+  function requestVisualizations() { var status = byId("visualizationStatus"); var button = byId("visualizeBtn"); button.disabled = true; status.textContent = ""; addText(status, "div", "stale", "Capturing the latest available frame and requesting three concepts…"); fetch("/api/visualizations", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ duration_seconds:10, variation_count:3 }) }).then(function (response) { if (!response.ok) return response.json().then(function (body) { throw new Error(body.detail || "Visualization request was not accepted"); }); return response.json(); }).then(function () { addText(status, "div", "muted", "Request accepted. Waiting for the frozen-frame concepts."); }).catch(function (error) { status.textContent = ""; addText(status, "div", "error", error.message); button.disabled = false; }); }
+  byId("visualizeBtn").addEventListener("click", requestVisualizations);
   byId("intentForm").addEventListener("submit", function (event) { event.preventDefault(); var status = byId("intentStatus"); text(status, "Saving intent..."); var constraints = byId("constraints").value.split(",").map(function (item) { return item.trim(); }).filter(Boolean); fetch("/api/intent", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ shot_name:byId("shotName").value, creative_goal:byId("creativeGoal").value, subject:byId("subject").value, desired_feel:byId("desiredFeel").value, camera_move:byId("cameraMove").value, constraints:constraints }) }).then(function (response) { if (!response.ok) throw new Error("Intent could not be saved"); text(status, "Intent active."); }).catch(function (error) { text(status, error.message); }); });
   fetch("/health").then(function (response) { return response.json(); }).then(function (health) { setPill("sourcePill", "Source: " + health.video_source, ""); }).catch(function () { setPill("sourcePill", "Source: unavailable", "off"); });
   loadState();
