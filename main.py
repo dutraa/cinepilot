@@ -6,6 +6,7 @@ SIGINT / Ctrl+C.
 
 Usage examples:
     python main.py --source synthetic
+    python main.py --source synthetic --demo-mode
     python main.py --source rtmp --rtmp-url rtmp://127.0.0.1:1935/live/drone
     python main.py --source file --video-path .\\footage\\flight01.mp4
     python main.py --source webcam --port 8080
@@ -22,6 +23,7 @@ import uvicorn
 
 import server
 from config import settings
+from demo_provider import DeterministicDemoProvider
 from director_agent import DirectorAgent
 from grafana_publisher import GrafanaPublisher
 from video_stream import VideoStreamManager
@@ -38,17 +40,44 @@ def parse_args() -> argparse.Namespace:
         "--source",
         choices=["rtmp", "rtsp", "webcam", "file", "synthetic"],
         default="rtmp",
-        help="Video source to ingest (default: rtmp; auto-falls back to synthetic).",
+        help="Video source to ingest (default: rtmp).",
+    )
+    parser.add_argument(
+        "--stream-url",
+        default=None,
+        help="RTMP/RTSP ingest URL (default: RTMP_URL / RTSP_URL from .env).",
     )
     parser.add_argument(
         "--rtmp-url",
         default=None,
-        help="Override the RTMP/RTSP ingest URL (default: RTMP_URL from .env).",
+        help="Backward-compatible alias for --stream-url.",
     )
     parser.add_argument(
         "--video-path",
         default=None,
         help="Path to a local video file (required for --source file).",
+    )
+    parser.add_argument(
+        "--webcam-index",
+        type=int,
+        default=0,
+        help="Webcam device index for --source webcam (default: 0).",
+    )
+    parser.add_argument(
+        "--demo-mode",
+        action="store_true",
+        help=(
+            "Run the explicit deterministic story demo without Gemini or "
+            "hardware; also allows synthetic fallback if the source fails."
+        ),
+    )
+    parser.add_argument(
+        "--allow-synthetic-fallback",
+        action="store_true",
+        help=(
+            "Allow a failed real source to fall back to synthetic frames. "
+            "Off by default: a real-drone failure must be visible, never fake."
+        ),
     )
     parser.add_argument(
         "--port",
@@ -79,15 +108,38 @@ async def run_app(args: argparse.Namespace) -> None:
         logger.error("--source file requires --video-path")
         sys.exit(2)
 
+    stream_url = args.stream_url or args.rtmp_url
+    if args.source == "rtsp" and not (stream_url or settings.RTSP_URL):
+        logger.error("--source rtsp requires --stream-url (or RTSP_URL in .env)")
+        sys.exit(2)
+
+    allow_fallback = (
+        args.allow_synthetic_fallback
+        or args.demo_mode
+        or settings.ALLOW_SYNTHETIC_FALLBACK
+    )
+
     # --- Video pipeline ---
     video_manager = VideoStreamManager(
         source=args.source,
-        rtmp_url=args.rtmp_url,
-        rtsp_url=args.rtmp_url,
+        rtmp_url=stream_url,
+        rtsp_url=stream_url,
         video_path=args.video_path,
+        webcam_index=args.webcam_index,
+        allow_synthetic_fallback=allow_fallback,
+        on_transition=server.app_state.record_source_transition,
     )
     video_manager.start()
     server.set_video_manager(video_manager)
+    server.app_state.set_provenance(
+        "deterministic_demo" if args.demo_mode else "live",
+        video_manager.active_source,
+    )
+
+    demo_provider = DeterministicDemoProvider() if args.demo_mode else None
+    server.set_demo_provider(demo_provider)
+    if demo_provider is not None:
+        demo_provider.seed(server.app_state)
 
     # --- Telemetry + agent ---
     grafana = GrafanaPublisher()

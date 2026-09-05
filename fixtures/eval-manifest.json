@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "status": "template",
+  "evaluation_assets": [],
+  "prompt_example_assets": [],
+  "disjointness_check": "sha256 manifests must contain no overlapping asset hashes"
+}

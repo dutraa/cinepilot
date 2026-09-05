@@ -1,8 +1,34 @@
-# 🎬 CinePilot
+# CinePilot
 
-**An Agentic Aerial Cinematography Director**
+**An Advisory AI Cinematic Decision Engine**
 
-CinePilot connects a live drone video feed to the **Google Gemini Live API** and turns it into an AI film director. Gemini watches your aerial footage in real time, evaluates framing, gimbal tilt, horizon alignment, composition, and lighting — then maintains an automated shot list and speaks flight corrections to the pilot, all rendered on a dark-mode "Director's Monitor" web dashboard.
+CinePilot connects live, prerecorded, or synthetic footage to the Google Gemini Live API and turns it into an advisory cinematic decision engine. Gemini watches footage in real time, compares it with a creator-provided story or shot intent, returns one to three structured cinematic tweaks, and can recommend what shot should be captured next to advance the story. The creator remains in control of approval and flight.
+
+## Cinematic Tweak Engine
+
+The current product loop is:
+
+```text
+Set shot intent -> watch the shot -> diagnose the highest-impact problem
+-> recommend a specific tweak -> creator accepts, acts, or dismisses
+-> watch the next result
+```
+
+The critique is the canonical product output. A critique contains a summary and up to three tweaks, each with a category, diagnosis, recommendation, rationale, priority, and optional spoken cue. The system is advisory: it does not control the drone or edit footage automatically.
+
+The next demo extends this into a story-aware coverage loop:
+
+```text
+load mock story -> watch current shot -> identify current beat and missing coverage
+-> recommend two or three next shots -> creator selects one -> capture manually
+-> mark coverage complete -> evaluate the next result
+```
+
+The seeded story and exact walkthrough are in `docs/demo-script.md`. The
+story-aware contracts and deterministic mock loop are implemented locally; live
+Gemini story reasoning remains separately labeled and requires a configured key.
+
+The current implementation is intentionally local and session-scoped. It writes critique and creator-action events to an append-only JSONL log for demo evidence and can optionally publish tool calls and telemetry to Grafana Loki.
 
 ## How It Works
 
@@ -24,12 +50,13 @@ flowchart LR
     W -- "Web Speech API TTS" --> P((Pilot))
 ```
 
-1. **`VideoStreamManager`** grabs frames from RTMP, RTSP, a webcam, a local video file, or a synthetic OpenCV-generated aerial scene. If a live source drops, it hot-swaps to the synthetic fallback automatically so the pipeline never stalls.
-2. **`DirectorAgent`** streams JPEG frames to Gemini Live at ~1.2 FPS over a bidirectional WebSocket and listens for responses.
-3. Gemini calls two tools as it directs the shoot:
+1. **`VideoStreamManager`** grabs frames from RTMP, RTSP, a webcam, a local video file, or a synthetic OpenCV-generated aerial scene. Real sources run through an explicit status machine (`connecting → live → stale → disconnected → reconnecting`) with exponential-backoff reconnects, stale-frame detection, and redacted stream URLs. A failed real source **never** silently becomes synthetic footage — synthetic fallback requires explicit opt-in (`--allow-synthetic-fallback` or `--demo-mode`).
+2. **`DirectorAgent`** streams JPEG frames to Gemini Live at ~1.2 FPS over a bidirectional WebSocket and listens for responses. Only fresh frames are forwarded; stale or disconnected frames are withheld and counted instead of being presented as current observations.
+3. Gemini calls three tools as it directs the shoot:
+   - **`publish_cinematic_critique`** — publishes one to three validated cinematic tweaks against the current intent.
    - **`update_shot_list`** — moves the 5-part shot list (Establishing Wide, Top-Down Property, Orbit Pass, Low Reveal, Pull Away) through `PENDING → IN_PROGRESS → COMPLETED / REJECTED` with directorial feedback.
    - **`speak_director_guidance`** — issues spoken flight cues ("Tilt down 15 degrees, subject is drifting off-center") at `INFO` / `WARNING` / `URGENT` priority.
-4. Every tool call and rolling frame metric (FPS, latency, frames sent) is pushed to **Grafana Loki** — or printed as structured JSON in Dry Run mode when no credentials are configured.
+4. Every tool call, critique, action decision, and rolling frame metric is recorded locally and optionally pushed to Grafana Loki.
 5. The **Director's Monitor** dashboard shows the live feed with a viewfinder HUD, the real-time shot list, and a guidance banner — and speaks new cues aloud in the browser via the Web Speech API.
 
 ## Screenshot Tour
@@ -38,6 +65,16 @@ flowchart LR
 - **Right panel** — the ER2 shot list with color-coded status badges and the director's latest feedback per shot.
 - **Bottom banner** — the most recent guidance cue; `WARNING` and `URGENT` cues glow and pulse for visibility.
 - **Header** — glowing status pills for Gemini (Connected / Connecting / Disconnected) and Grafana (Live / Dry Run), plus a mute toggle for audio guidance.
+
+The story-aware dashboard now answers: what beat are we in, what did the current shot prove, what is missing, and which next shot can advance the story. Deterministic fixture behavior is labeled separately from live Gemini behavior.
+
+The story-first dashboard also includes an advisory Visualize panel. With a
+synthetic, prerecorded, webcam, RTSP, or RTMP source, the creator can freeze the
+latest real-place frame, request exactly three fixed 10-second concept
+animations, select one, and receive a manual capture brief. The response shows
+source provenance, snapshot dimensions, renderer version, and render-quality
+notes. The concepts are illustrative 2D references, not flight truth, obstacle
+maps, spatial reconstruction, or evidence that the captured shot improved.
 
 ## Quick Start
 
@@ -81,16 +118,26 @@ No drone handy? Start with the built-in synthetic aerial scene:
 python main.py --source synthetic
 ```
 
+To run the repeatable story-aware mock demo without a Gemini key, drone, RTMP,
+or Grafana:
+
+```bash
+python main.py --source synthetic --demo-mode
+```
+
 Then open **http://127.0.0.1:8000** in your browser.
 
 Other sources:
 
 ```bash
-# Live DJI drone feed via RTMP
-python main.py --source rtmp --rtmp-url rtmp://127.0.0.1:1935/live/drone
+# Live drone feed via RTMP (e.g. DJI Fly -> MediaMTX; see docs/real-drone-setup.md)
+python main.py --source rtmp --stream-url rtmp://127.0.0.1:1935/live/drone
 
-# An RTSP camera
-python main.py --source rtsp --rtmp-url rtsp://192.168.1.50:554/stream
+# An RTSP camera or MediaMTX republish
+python main.py --source rtsp --stream-url rtsp://127.0.0.1:8554/live/drone
+
+# Explicit synthetic demo mode
+python main.py --source synthetic --demo-mode
 
 # A local video file (loops forever)
 python main.py --source file --video-path footage/flight01.mp4
@@ -99,7 +146,15 @@ python main.py --source file --video-path footage/flight01.mp4
 python main.py --source webcam --port 8080
 ```
 
-If an RTMP/webcam source fails or disconnects mid-flight, CinePilot logs a warning and switches to the synthetic fallback rather than going dark.
+`--rtmp-url` is still accepted as a backward-compatible alias for `--stream-url`.
+
+If a real RTMP/RTSP/webcam source fails or disconnects mid-flight, CinePilot reports `disconnected`, drops the stale frame, shows a clearly-labeled "NO LIVE SIGNAL" card, and reconnects with exponential backoff — it does **not** silently switch to synthetic footage. To allow synthetic fallback explicitly (demos only), pass `--allow-synthetic-fallback` or `--demo-mode`; the fallback is then visibly labeled in the dashboard and in the evidence log.
+
+For the full real-drone workflow (DJI Fly/Pilot → MediaMTX → CinePilot on Windows 11, verification, interruption/recovery behavior), see [docs/real-drone-setup.md](docs/real-drone-setup.md).
+
+### Safety boundary
+
+CinePilot is **advisory only**. It never controls the drone: no autonomous flight, waypoints, gimbal commands, takeoff/landing, or SDK control calls exist anywhere in the system, and the model is instructed it must not generate flight commands or certify that any route is safe. All recommendations are for a human pilot to evaluate and execute manually; only the creator can mark a shot completed.
 
 ## Configuration Reference
 
@@ -110,6 +165,15 @@ All settings are read from `.env` (or environment variables) via pydantic-settin
 | `GEMINI_API_KEY` | *(empty)* | Google Gemini API key. Without it, the monitor UI still runs but no AI direction occurs. |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini Live model to connect to. |
 | `RTMP_URL` | `rtmp://127.0.0.1:1935/live/drone` | Default RTMP ingest URL. |
+| `RTSP_URL` | *(empty)* | Default RTSP ingest URL for `--source rtsp`. |
+| `SOURCE_CONNECT_TIMEOUT_SEC` | `10.0` | Seconds to wait for a real source to open. |
+| `SOURCE_RECONNECT_DELAY_SEC` | `2.0` | Initial reconnect delay after a disconnect (doubles each attempt). |
+| `SOURCE_RECONNECT_MAX_DELAY_SEC` | `30.0` | Reconnect backoff cap. |
+| `SOURCE_STALE_AFTER_SEC` | `3.0` | Newest frame older than this ⇒ source reported `stale`. |
+| `SOURCE_MAX_FRAME_AGE_SEC` | `2.0` | Frames older than this are never sent to Gemini as current. |
+| `SOURCE_HEALTH_INTERVAL_SEC` | `2.0` | Dashboard/health source-state polling cadence. |
+| `SOURCE_LOW_LATENCY` | `true` | Keep driver-side capture buffering minimal. |
+| `ALLOW_SYNTHETIC_FALLBACK` | `false` | Allow a failed real source to fall back to synthetic frames. Leave off for real flights. |
 | `GRAFANA_URL` | *(empty)* | Grafana Loki push endpoint (`.../loki/api/v1/push`). |
 | `GRAFANA_USER` | *(empty)* | Grafana Cloud Loki username / tenant ID. |
 | `GRAFANA_API_KEY` | *(empty)* | Grafana Cloud API token. |
@@ -126,7 +190,21 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 | `GET /` | The Director's Monitor dashboard. |
 | `GET /video_feed` | Live MJPEG stream (`multipart/x-mixed-replace`). |
 | `GET /events` | Server-Sent Events stream of the full app state (shot list, guidance, metrics), pushed on change or every 250 ms. |
-| `GET /health` | JSON system status: video source, Gemini/Grafana status, frames sent. |
+| `GET /api/state` | Current validated intent, critique, history, actions, shots, and metrics. |
+| `POST /api/intent` | Set the creator's current shot intent. |
+| `POST /api/critiques/{critique_id}/tweaks/{tweak_id}/decision` | Mark a tweak accepted, acted, or dismissed (creator-only). |
+| `POST /api/shots/{shot_id}` | Creator-only shot lifecycle update — the only path that can mark a shot `COMPLETED`. |
+| `GET /api/story` | Return the story, ordered beats, active beat, versions, and provenance. |
+| `POST /api/story/beat` | Activate or skip a beat through the state machine. |
+| `GET /api/coverage` | Return captured, covered, and missing story proof. |
+| `GET /api/recommendations` | Return latest recommendations and history. |
+| `POST /api/recommendations` | Publish a validated manual recommendation batch. |
+| `POST /api/recommendations/{id}/decision` | Select, complete, or dismiss a recommendation. |
+| `POST /api/visualizations` | Request exactly three deterministic 10-second concepts for the current story context and frozen source observation. |
+| `GET /api/visualizations` | List bounded session-local visualization jobs. |
+| `GET /api/visualizations/{job_id}` | Return one visualization job and its linked previews. |
+| `GET /api/visualizations/{job_id}/source-frame` | Return the server-frozen JPEG for browser animation while the bounded session job is retained. |
+| `GET /health` | JSON system status: full source snapshot (status, provenance, frame age, FPS, reconnects, redacted URL), Gemini/Grafana status, frame counters. |
 
 ## Project Structure
 
@@ -134,13 +212,24 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 cinepilot/
 ├── main.py               # CLI runner: video + web server + agent, graceful shutdown
 ├── director_agent.py     # Gemini Live session: frame sender, response receiver, reconnection
-├── tools.py              # Tool declarations (update_shot_list, speak_director_guidance) + executors
+├── tools.py              # Gemini tool declarations and validated executors
+├── schemas.py             # Strict intent, critique, tweak, and decision contracts
+├── state.py               # Thread-safe active-run state and lifecycle rules
+├── event_log.py           # Append-only JSONL evidence events
+├── director_prompt.py     # Versioned cinematic-tweak system prompt
+├── domain.py              # Dependency-free shared domain constants
 ├── video_stream.py       # Hot-swappable video sources with synthetic aerial fallback
 ├── server.py             # FastAPI app, thread-safe AppState, MJPEG + SSE endpoints
 ├── grafana_publisher.py  # Non-blocking Loki telemetry (background thread / dry-run mode)
 ├── config.py             # pydantic-settings configuration
+├── story_demo.py          # Strict seeded story fixture loader
+├── demo_provider.py       # Explicit deterministic recommendation provider
 ├── templates/
 │   └── index.html        # Dark-mode Director's Monitor dashboard
+├── AGENTS.md             # Operating contract for coding agents
+├── everythings.md        # Compact source-of-truth project map
+├── docs/                 # Evidence frame, spec, architecture, decisions, evaluation, demo, issues
+├── fixtures/             # Seeded story and held-out evaluation manifest
 ├── requirements.txt
 └── .env.example
 ```
@@ -161,9 +250,30 @@ A simple LogQL query to see the director at work:
 ## Notes & Tips
 
 - **Audio guidance** uses the browser's native `speechSynthesis` — most browsers require one user interaction (a click anywhere) before audio will play. Use the header button to mute/unmute.
-- **DJI drones** can stream RTMP directly from the DJI Fly / Pilot app to a local RTMP server; point `RTMP_URL` at it.
-- The synthetic source is great for demos and development — it renders a moving subject, tilting horizon, and composition guides, which gives Gemini real material to critique.
+- **DJI drones** can stream RTMP directly from the DJI Fly / Pilot app to a local RTMP server (e.g. MediaMTX); point `--stream-url` at it. Full walkthrough: [docs/real-drone-setup.md](docs/real-drone-setup.md).
+- **Real-drone status**: the RTMP/RTSP observation path is implemented and covered by deterministic fake-source tests, but has not yet been verified against real drone hardware — see the checklist in `docs/real-drone-setup.md`.
+- The synthetic source is great for demos and development — it renders a moving subject and tilting horizon; composition guides are added only in the browser so they do not contaminate Gemini's input.
 - Frame sampling rate, JPEG quality (80), and max frame dimension (1024 px) are tuned to keep Gemini Live latency low; adjust `FRAME_INTERVAL_SEC` if you want tighter or looser direction.
+
+## Verification
+
+Run the application checks with:
+
+```bash
+python -m pytest -p no:cacheprovider -q
+ruff check --no-cache .
+python -c "import ast, pathlib; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in list(pathlib.Path('.').glob('*.py')) + list(pathlib.Path('tests').glob('*.py'))]"
+git diff --check
+```
+
+The video-source tests use a deterministic fake capture adapter (`tests/test_video_stream.py`), so RTMP/RTSP connection, reconnect, stale-frame, and fallback behavior are verified without hardware.
+
+For an isolated browser smoke check, start the synthetic server and capture the dashboard with Playwright Chromium:
+
+```bash
+python main.py --source synthetic
+npx --yes playwright screenshot --browser=chromium http://127.0.0.1:8000 dashboard.png
+```
 
 ## License
 
