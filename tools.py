@@ -72,6 +72,13 @@ CRITIQUE_SCHEMA = types.FunctionDeclaration(
                         ),
                         "confidence": types.Schema(type=types.Type.NUMBER),
                         "spoken_cue": types.Schema(type=types.Type.STRING),
+                        "safety_note": types.Schema(
+                            type=types.Type.STRING,
+                            description=(
+                                "What the human pilot must verify themselves "
+                                "before acting (obstacles, altitude, people)."
+                            ),
+                        ),
                     },
                     required=[
                         "category",
@@ -87,12 +94,19 @@ CRITIQUE_SCHEMA = types.FunctionDeclaration(
     ),
 )
 
+"""Shot statuses Gemini may set. COMPLETED is creator-only: only the human
+who flew and captured the shot can mark it complete (via /api/shots)."""
+MODEL_ALLOWED_SHOT_STATUSES = tuple(
+    status for status in ALLOWED_STATUSES if status != "COMPLETED"
+)
+
 SHOT_LIST_SCHEMA = types.FunctionDeclaration(
     name="update_shot_list",
     description=(
         "Update the status and directorial feedback for one shot in the 5-part "
-        "aerial shot list. Call this whenever a shot is being attempted, has "
-        "been captured well (COMPLETED), or must be re-flown (REJECTED)."
+        "aerial shot list. Call this when a shot is being attempted "
+        "(IN_PROGRESS) or must be re-flown (REJECTED). Only the creator can "
+        "mark a shot COMPLETED after flying and capturing it."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
@@ -105,7 +119,7 @@ SHOT_LIST_SCHEMA = types.FunctionDeclaration(
             "status": types.Schema(
                 type=types.Type.STRING,
                 description="New status for the shot.",
-                enum=ALLOWED_STATUSES,
+                enum=list(MODEL_ALLOWED_SHOT_STATUSES),
             ),
             "feedback": types.Schema(
                 type=types.Type.STRING,
@@ -166,6 +180,11 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _record_malformed(app_state: Any, tool_name: str, reason: str) -> None:
+    if hasattr(app_state, "record_malformed_tool_call"):
+        app_state.record_malformed_tool_call(tool_name, reason)
+
+
 def execute_update_shot_list(app_state: Any, args: Dict[str, Any]) -> Dict[str, Any]:
     """Validate and apply an `update_shot_list` call against the app state."""
     shot_id = str(args.get("shot_id", "")).strip()
@@ -173,17 +192,33 @@ def execute_update_shot_list(app_state: Any, args: Dict[str, Any]) -> Dict[str, 
     feedback = str(args.get("feedback", "")).strip()
 
     if shot_id not in ALLOWED_SHOT_IDS:
+        _record_malformed(app_state, "update_shot_list", "unknown_shot_id")
         return {
             "ok": False,
             "error": f"Unknown shot_id '{shot_id}'. Allowed: {ALLOWED_SHOT_IDS}",
         }
-    if status not in ALLOWED_STATUSES:
+    if status not in MODEL_ALLOWED_SHOT_STATUSES:
+        if status == "COMPLETED":
+            _record_malformed(
+                app_state, "update_shot_list", "model_attempted_completion"
+            )
+            return {
+                "ok": False,
+                "error": (
+                    "Only the creator can mark a shot COMPLETED after they "
+                    "have flown and captured it. You may set IN_PROGRESS or "
+                    "REJECTED with feedback."
+                ),
+            }
+        _record_malformed(app_state, "update_shot_list", "invalid_status")
         return {
             "ok": False,
-            "error": f"Invalid status '{status}'. Allowed: {ALLOWED_STATUSES}",
+            "error": (
+                f"Invalid status '{status}'. Allowed: {MODEL_ALLOWED_SHOT_STATUSES}"
+            ),
         }
 
-    app_state.update_shot(shot_id, status, feedback)
+    app_state.update_shot(shot_id, status, feedback, actor="model")
     logger.info("Shot list updated: %s -> %s (%s)", shot_id, status, feedback)
     return {
         "ok": True,
@@ -279,6 +314,7 @@ def execute_tool(
     executor = TOOL_EXECUTORS.get(name)
     if executor is None:
         logger.warning("Gemini requested unknown tool: %s", name)
+        _record_malformed(app_state, name, "unknown_tool")
         return {"ok": False, "error": f"Unknown tool '{name}'"}
     try:
         if name == "publish_cinematic_critique":
@@ -286,4 +322,5 @@ def execute_tool(
         return executor(app_state, args or {})
     except Exception as exc:  # noqa: BLE001 - tool results must never raise upstream
         logger.exception("Tool execution failed for %s", name)
+        _record_malformed(app_state, name, "execution_error")
         return {"ok": False, "error": f"Tool execution failed: {exc}"}

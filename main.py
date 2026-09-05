@@ -38,17 +38,41 @@ def parse_args() -> argparse.Namespace:
         "--source",
         choices=["rtmp", "rtsp", "webcam", "file", "synthetic"],
         default="rtmp",
-        help="Video source to ingest (default: rtmp; auto-falls back to synthetic).",
+        help="Video source to ingest (default: rtmp).",
+    )
+    parser.add_argument(
+        "--stream-url",
+        default=None,
+        help="RTMP/RTSP ingest URL (default: RTMP_URL / RTSP_URL from .env).",
     )
     parser.add_argument(
         "--rtmp-url",
         default=None,
-        help="Override the RTMP/RTSP ingest URL (default: RTMP_URL from .env).",
+        help="Backward-compatible alias for --stream-url.",
     )
     parser.add_argument(
         "--video-path",
         default=None,
         help="Path to a local video file (required for --source file).",
+    )
+    parser.add_argument(
+        "--webcam-index",
+        type=int,
+        default=0,
+        help="Webcam device index for --source webcam (default: 0).",
+    )
+    parser.add_argument(
+        "--demo-mode",
+        action="store_true",
+        help="Explicit demo run: allows synthetic fallback if the source fails.",
+    )
+    parser.add_argument(
+        "--allow-synthetic-fallback",
+        action="store_true",
+        help=(
+            "Allow a failed real source to fall back to synthetic frames. "
+            "Off by default: a real-drone failure must be visible, never fake."
+        ),
     )
     parser.add_argument(
         "--port",
@@ -79,12 +103,26 @@ async def run_app(args: argparse.Namespace) -> None:
         logger.error("--source file requires --video-path")
         sys.exit(2)
 
+    stream_url = args.stream_url or args.rtmp_url
+    if args.source == "rtsp" and not (stream_url or settings.RTSP_URL):
+        logger.error("--source rtsp requires --stream-url (or RTSP_URL in .env)")
+        sys.exit(2)
+
+    allow_fallback = (
+        args.allow_synthetic_fallback
+        or args.demo_mode
+        or settings.ALLOW_SYNTHETIC_FALLBACK
+    )
+
     # --- Video pipeline ---
     video_manager = VideoStreamManager(
         source=args.source,
-        rtmp_url=args.rtmp_url,
-        rtsp_url=args.rtmp_url,
+        rtmp_url=stream_url,
+        rtsp_url=stream_url,
         video_path=args.video_path,
+        webcam_index=args.webcam_index,
+        allow_synthetic_fallback=allow_fallback,
+        on_transition=server.app_state.record_source_transition,
     )
     video_manager.start()
     server.set_video_manager(video_manager)

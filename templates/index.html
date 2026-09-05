@@ -78,6 +78,8 @@
   .pill.warn .dot { background: var(--yellow); box-shadow: 0 0 8px 1px rgba(241, 196, 15, 0.5); }
   .pill.off { color: var(--red); border-color: rgba(231, 76, 60, 0.4); }
   .pill.off .dot { background: var(--red); box-shadow: 0 0 8px 1px rgba(231, 76, 60, 0.5); }
+  .pill.alt { color: var(--orange); border-color: rgba(243, 156, 18, 0.5); }
+  .pill.alt .dot { background: var(--orange); box-shadow: 0 0 8px 1px rgba(243, 156, 18, 0.5); }
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.45; }
@@ -169,6 +171,49 @@
     border-radius: 6px;
     backdrop-filter: blur(4px);
   }
+
+  /* ---------- Source strip ---------- */
+  .source-strip {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    padding: 10px 16px;
+    border-top: 1px solid var(--panel-edge);
+    font-size: 0.76rem; color: var(--text-dim);
+    font-family: "Cascadia Code", "Consolas", monospace;
+  }
+  .source-strip b { color: var(--text); font-weight: 600; }
+  .source-strip .real-badge {
+    font-weight: 700; letter-spacing: 1px; padding: 3px 10px; border-radius: 999px;
+    font-size: 0.68rem;
+  }
+  .real-badge.real { background: rgba(46, 204, 113, 0.14); color: var(--green); border: 1px solid rgba(46, 204, 113, 0.55); }
+  .real-badge.synthetic { background: rgba(243, 156, 18, 0.14); color: var(--orange); border: 1px solid rgba(243, 156, 18, 0.55); }
+  .monitor-overlay {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: 8px;
+    background: rgba(10, 8, 8, 0.82);
+    text-align: center; padding: 20px;
+  }
+  .monitor-overlay.visible { display: flex; }
+  .monitor-overlay .overlay-title { font-size: 1.3rem; font-weight: 700; color: var(--red); letter-spacing: 1.5px; }
+  .monitor-overlay.stale .overlay-title, .monitor-overlay.reconnecting .overlay-title,
+  .monitor-overlay.connecting .overlay-title, .monitor-overlay.fallback .overlay-title { color: var(--orange); }
+  .monitor-overlay .overlay-reason { font-size: 0.82rem; color: var(--text-dim); max-width: 80%; }
+  .critique-warning {
+    display: none;
+    margin-bottom: 10px; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid rgba(243, 156, 18, 0.55); color: var(--orange);
+    background: rgba(243, 156, 18, 0.08); font-size: 0.78rem; line-height: 1.4;
+  }
+  .critique-warning.visible { display: block; }
+  .tweak-safety { margin-top: 6px; color: var(--orange); font-size: 0.74rem; line-height: 1.4; }
+  .advisory-note { padding: 8px 16px 12px; color: var(--text-dim); font-size: 0.72rem; line-height: 1.4; }
+  .shot-complete-btn {
+    margin-top: 8px; background: transparent; color: var(--green);
+    border: 1px solid rgba(46, 204, 113, 0.5); border-radius: 7px;
+    padding: 5px 9px; font-size: 0.7rem; font-weight: 700; cursor: pointer;
+  }
+  .shot-complete-btn:hover { background: rgba(46, 204, 113, 0.12); }
 
   /* ---------- Shot list ---------- */
   .shot-list { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
@@ -283,6 +328,7 @@
     <div id="geminiPill" class="pill warn"><span class="dot"></span><span id="geminiPillText">Gemini: Connecting</span></div>
     <div id="grafanaPill" class="pill warn"><span class="dot"></span><span id="grafanaPillText">Grafana: Dry Run</span></div>
     <div id="sourcePill" class="pill"><span class="dot"></span><span id="sourcePillText">Source: checking</span></div>
+    <div id="ssePill" class="pill warn"><span class="dot"></span><span id="ssePillText">Data: connecting</span></div>
     <button id="muteBtn">Mute Audio Guidance</button>
   </div>
 </header>
@@ -308,6 +354,25 @@
         <span>LATENCY <b id="latencyVal">0</b> ms</span>
         <span>FRAMES <b id="framesVal">0</b></span>
       </div>
+      <div id="monitorOverlay" class="monitor-overlay">
+        <div class="overlay-title" id="overlayTitle">SOURCE DISCONNECTED</div>
+        <div class="overlay-reason" id="overlayReason"></div>
+      </div>
+    </div>
+    <div class="source-strip">
+      <span id="realBadge" class="real-badge synthetic">CHECKING</span>
+      <span>status <b id="srcStatus">connecting</b></span>
+      <span>requested <b id="srcRequested">-</b></span>
+      <span>active <b id="srcActive">-</b></span>
+      <span>frame age <b id="srcFrameAge">-</b></span>
+      <span>capture fps <b id="srcFps">-</b></span>
+      <span>reconnects <b id="srcReconnects">0</b></span>
+      <span id="srcUrl"></span>
+    </div>
+    <div id="srcReason" class="advisory-note"></div>
+    <div class="advisory-note">
+      CinePilot is advisory only. It never controls the drone. The pilot is
+      responsible for flight safety, obstacle clearance, and every maneuver.
     </div>
   </div>
 
@@ -332,6 +397,10 @@
       <div id="intentStatus" class="intent-status"></div>
     </form>
     <div class="panel-title">Latest Cinematic Critique</div>
+    <div id="critiqueWarning" class="critique-warning">
+      Source is not live — recommendations below may not reflect the current
+      scene. Reconnect the stream before acting on them.
+    </div>
     <div id="critiquePanel" class="critique">
       <div class="critique-empty">Set a shot intent, then bring up the live feed. The director will return the highest-impact cinematic tweaks.</div>
     </div>
@@ -371,6 +440,18 @@
 
   let muted = false;
   let lastSpokenTimestamp = null;
+  let lastSseAt = 0;
+  let sourceLive = false;
+
+  var SOURCE_PILL_CLASS = {
+    live: "on",
+    connecting: "warn",
+    reconnecting: "warn",
+    stale: "alt",
+    fallback: "alt",
+    disconnected: "off",
+    stopped: "off"
+  };
 
   const muteBtn = document.getElementById("muteBtn");
   muteBtn.addEventListener("click", function () {
@@ -398,18 +479,106 @@
     SHOT_ORDER.forEach(function (id) {
       const shot = shots[id];
       if (!shot) return;
+      const status = String(shot.status || "PENDING");
       const card = document.createElement("div");
-      card.className = "shot " + shot.status;
-      card.innerHTML =
-        '<div class="shot-head">' +
-          '<div class="shot-name"></div>' +
-          '<div class="badge ' + shot.status + '">' + shot.status.replace("_", " ") + "</div>" +
-        "</div>" +
-        '<div class="shot-feedback"></div>';
-      card.querySelector(".shot-name").textContent = shot.title;
-      card.querySelector(".shot-feedback").textContent = shot.feedback || "";
+      card.className = "shot " + status;
+
+      const head = document.createElement("div");
+      head.className = "shot-head";
+      const name = document.createElement("div");
+      name.className = "shot-name";
+      name.textContent = shot.title;
+      const badge = document.createElement("div");
+      badge.className = "badge " + status;
+      badge.textContent = status.replace("_", " ");
+      head.appendChild(name);
+      head.appendChild(badge);
+      card.appendChild(head);
+
+      const feedback = document.createElement("div");
+      feedback.className = "shot-feedback";
+      feedback.textContent = shot.feedback || "";
+      card.appendChild(feedback);
+
+      if (status !== "COMPLETED") {
+        // Completion is a creator decision: only this button (not the model,
+        // not a stream event) can mark the manual capture done.
+        const done = document.createElement("button");
+        done.type = "button";
+        done.className = "shot-complete-btn";
+        done.textContent = "Mark captured & completed";
+        done.addEventListener("click", function () {
+          completeShot(id);
+        });
+        card.appendChild(done);
+      }
       list.appendChild(card);
     });
+  }
+
+  async function completeShot(shotId) {
+    try {
+      const response = await fetch("/api/shots/" + encodeURIComponent(shotId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "COMPLETED",
+          feedback: "Creator confirmed the manual capture is complete."
+        })
+      });
+      if (!response.ok) throw new Error("Shot completion was not accepted");
+    } catch (err) {
+      document.getElementById("intentStatus").textContent = err.message;
+    }
+  }
+
+  function renderSource(source) {
+    if (!source) return;
+    const status = String(source.status || "connecting");
+    sourceLive = status === "live";
+
+    const pill = document.getElementById("sourcePill");
+    pill.classList.remove("on", "warn", "off", "alt");
+    pill.classList.add(SOURCE_PILL_CLASS[status] || "warn");
+    document.getElementById("sourcePillText").textContent =
+      "Source: " + String(source.active_source || "?") + " · " + status;
+
+    const realBadge = document.getElementById("realBadge");
+    const realFeed = source.is_real_source && !source.fallback_active;
+    realBadge.className = "real-badge " + (realFeed ? "real" : "synthetic");
+    realBadge.textContent = realFeed
+      ? "REAL SOURCE"
+      : (source.fallback_active ? "SYNTHETIC FALLBACK" : "SYNTHETIC / GENERATED");
+
+    document.getElementById("srcStatus").textContent = status;
+    document.getElementById("srcRequested").textContent = source.requested_source || "-";
+    document.getElementById("srcActive").textContent = source.active_source || "-";
+    document.getElementById("srcFrameAge").textContent =
+      source.frame_age_sec === null || source.frame_age_sec === undefined
+        ? "no frame"
+        : Number(source.frame_age_sec).toFixed(1) + "s";
+    document.getElementById("srcFps").textContent =
+      source.fps === undefined ? "-" : Number(source.fps).toFixed(1);
+    document.getElementById("srcReconnects").textContent =
+      String(source.reconnect_count === undefined ? 0 : source.reconnect_count);
+    document.getElementById("srcUrl").textContent = source.stream_url || "";
+    document.getElementById("srcReason").textContent =
+      status === "live" ? "" : "Source state: " + status + " — " + String(source.status_reason || "");
+
+    const overlay = document.getElementById("monitorOverlay");
+    overlay.className = "monitor-overlay " + status;
+    const showOverlay = status !== "live" && status !== "fallback";
+    if (showOverlay) overlay.classList.add("visible");
+    document.getElementById("overlayTitle").textContent =
+      status === "stale" ? "FEED STALE"
+      : status === "connecting" ? "CONNECTING TO SOURCE"
+      : status === "reconnecting" ? "RECONNECTING"
+      : status === "stopped" ? "SOURCE STOPPED"
+      : "SOURCE DISCONNECTED";
+    document.getElementById("overlayReason").textContent = String(source.status_reason || "");
+
+    const warning = document.getElementById("critiqueWarning");
+    warning.classList.toggle("visible", Boolean(source.is_real_source) && !sourceLive);
   }
 
   function renderGuidance(guidance) {
@@ -481,6 +650,13 @@
       rationale.textContent = tweak.rationale;
       card.appendChild(rationale);
 
+      if (tweak.safety_note) {
+        const safety = document.createElement("div");
+        safety.className = "tweak-safety";
+        safety.textContent = "Pilot must verify: " + tweak.safety_note;
+        card.appendChild(safety);
+      }
+
       if (tweak.status === "PROPOSED" || tweak.status === "ACCEPTED") {
         const actions = document.createElement("div");
         actions.className = "tweak-actions";
@@ -514,13 +690,31 @@
   }
 
   async function refreshHealth() {
+    // Fallback path only: while SSE is fresh it owns the source display.
+    if (Date.now() - lastSseAt < 3000) return;
     try {
       const response = await fetch("/health");
       if (!response.ok) return;
       const health = await response.json();
-      document.getElementById("sourcePillText").textContent = "Source: " + health.video_source;
+      if (health.source) renderSource(health.source);
     } catch (err) {
       document.getElementById("sourcePillText").textContent = "Source: unavailable";
+    }
+  }
+
+  function updateSsePill() {
+    const pill = document.getElementById("ssePill");
+    const text = document.getElementById("ssePillText");
+    pill.classList.remove("on", "warn", "off", "alt");
+    if (lastSseAt === 0) {
+      pill.classList.add("warn");
+      text.textContent = "Data: connecting";
+    } else if (Date.now() - lastSseAt > 3000) {
+      pill.classList.add("alt");
+      text.textContent = "Data: stale (no updates)";
+    } else {
+      pill.classList.add("on");
+      text.textContent = "Data: live";
     }
   }
 
@@ -577,27 +771,31 @@
     source.onmessage = function (event) {
       try {
         const state = JSON.parse(event.data);
+        lastSseAt = Date.now();
         renderShots(state.shots || {});
         renderGuidance(state.latest_guidance || {});
         renderMetrics(state.metrics || {});
         renderIntent(state.intent);
         renderCritique(state.latest_critique);
+        renderSource(state.source);
+        updateSsePill();
       } catch (err) {
         console.error("Bad SSE payload", err);
       }
     };
     source.onerror = function () {
-      // EventSource auto-reconnects; reflect the outage on the Gemini pill.
-      const geminiPill = document.getElementById("geminiPill");
-      geminiPill.classList.remove("on", "warn");
-      geminiPill.classList.add("off");
-      document.getElementById("geminiPillText").textContent = "Gemini: Disconnected";
+      // EventSource auto-reconnects; mark the data channel as down meanwhile.
+      const pill = document.getElementById("ssePill");
+      pill.classList.remove("on", "warn", "alt");
+      pill.classList.add("off");
+      document.getElementById("ssePillText").textContent = "Data: disconnected";
     };
   }
 
   connectEvents();
   refreshHealth();
   window.setInterval(refreshHealth, 2000);
+  window.setInterval(updateSsePill, 1000);
 })();
 </script>
 

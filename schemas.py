@@ -66,6 +66,7 @@ class CinematicTweakInput(StrictModel):
     priority: Priority = Priority.INFO
     confidence: confloat(ge=0.0, le=1.0) | None = None
     spoken_cue: str | None = Field(default=None, max_length=180)
+    safety_note: str | None = Field(default=None, max_length=300)
 
 
 class CinematicCritiqueInput(StrictModel):
@@ -82,6 +83,7 @@ class CinematicTweak(StrictModel):
     priority: Priority = Priority.INFO
     confidence: confloat(ge=0.0, le=1.0) | None = None
     spoken_cue: str | None = Field(default=None, max_length=180)
+    safety_note: str | None = Field(default=None, max_length=300)
     status: TweakStatus = TweakStatus.PROPOSED
 
 
@@ -94,6 +96,20 @@ class CinematicCritique(StrictModel):
     intent: CinematicIntent
     summary: str = Field(min_length=1, max_length=500)
     tweaks: list[CinematicTweak] = Field(min_length=1, max_length=3)
+
+
+class ShotStatus(str, Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    REJECTED = "REJECTED"
+
+
+class ShotUpdateRequest(StrictModel):
+    """Creator-driven shot lifecycle update (the only path to COMPLETED)."""
+
+    status: ShotStatus
+    feedback: str = Field(default="", max_length=400)
 
 
 class TweakDecisionRequest(StrictModel):

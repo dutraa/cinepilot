@@ -58,12 +58,34 @@ class AppState:
             "fps": 0.0,
             "latency_ms": 0.0,
             "frames_sent": 0,
+            "frames_skipped_stale": 0,
             "critiques_received": 0,
             "valid_critiques": 0,
             "invalid_critiques": 0,
+            "malformed_tool_calls": 0,
+            "gemini_reconnects": 0,
             "tweaks_acted": 0,
             "gemini_status": "Connecting",
             "grafana_status": "Dry Run",
+        }
+        # Last known source snapshot (updated on every source transition).
+        self.source: dict[str, Any] = {
+            "requested_source": "unknown",
+            "active_source": "unknown",
+            "protocol": None,
+            "stream_url": None,
+            "status": "connecting",
+            "status_reason": "not started",
+            "is_real_source": False,
+            "provenance": "unknown",
+            "first_frame_at": None,
+            "last_frame_at": None,
+            "frame_age_sec": None,
+            "fps": 0.0,
+            "frames_captured": 0,
+            "reconnect_count": 0,
+            "fallback_active": False,
+            "allow_synthetic_fallback": False,
         }
 
     @staticmethod
@@ -115,7 +137,54 @@ class AppState:
         with self._lock:
             self.metrics["invalid_critiques"] += 1
             self._version += 1
-            self._event_log.record("critique_rejected", reason=reason)
+            self._event_log.record(
+                "critique_rejected", reason=reason, provenance="gemini"
+            )
+
+    def record_malformed_tool_call(self, tool_name: str, reason: str) -> None:
+        """Count a Gemini tool call that could not be executed as requested."""
+        with self._lock:
+            self.metrics["malformed_tool_calls"] += 1
+            self._version += 1
+            self._event_log.record(
+                "tool_call_malformed",
+                tool=tool_name,
+                reason=reason,
+                provenance="gemini",
+            )
+
+    def record_source_transition(self, snapshot: dict[str, Any]) -> None:
+        """Store the latest source snapshot and log the transition as evidence."""
+        with self._lock:
+            self.source = dict(snapshot)
+            self._version += 1
+            self._event_log.record(
+                "source_transition",
+                status=snapshot.get("status"),
+                reason=snapshot.get("status_reason"),
+                requested_source=snapshot.get("requested_source"),
+                active_source=snapshot.get("active_source"),
+                provenance=snapshot.get("provenance"),
+                reconnect_count=snapshot.get("reconnect_count"),
+                fallback_active=snapshot.get("fallback_active"),
+            )
+
+    def record_frame_observation(
+        self, observation_id: str, provenance: str, source_status: str
+    ) -> None:
+        """Log one frame observation sent to Gemini, with its provenance stratum."""
+        with self._lock:
+            self._event_log.record(
+                "frame_observation",
+                observation_id=observation_id,
+                provenance=provenance,
+                source_status=source_status,
+            )
+
+    def record_stale_frame_skipped(self) -> None:
+        with self._lock:
+            self.metrics["frames_skipped_stale"] += 1
+            self._version += 1
 
     def decide_tweak(self, critique_id: str, tweak_id: str, decision: Decision) -> TweakStatus:
         with self._lock:
@@ -152,16 +221,38 @@ class AppState:
                 critique_id=critique_id,
                 tweak_id=tweak_id,
                 decision=decision.value,
+                actor="creator",
             )
             return target
 
-    def update_shot(self, shot_id: str, status: str, feedback: str) -> None:
+    def update_shot(
+        self, shot_id: str, status: str, feedback: str, actor: str = "model"
+    ) -> None:
         with self._lock:
             if shot_id not in ALLOWED_SHOT_IDS or status not in ALLOWED_STATUSES:
+                return
+            if self.shots[shot_id]["status"] == status and (
+                self.shots[shot_id]["feedback"] == feedback
+            ):
                 return
             self.shots[shot_id]["status"] = status
             self.shots[shot_id]["feedback"] = feedback
             self._version += 1
+            self._event_log.record(
+                "shot_updated",
+                shot_id=shot_id,
+                status=status,
+                feedback=feedback,
+                actor=actor,
+            )
+
+    def creator_update_shot(self, shot_id: str, status: str, feedback: str) -> None:
+        """Creator-only shot lifecycle update (the only path to COMPLETED)."""
+        if shot_id not in ALLOWED_SHOT_IDS:
+            raise StateNotFoundError(f"unknown shot '{shot_id}'")
+        if status not in ALLOWED_STATUSES:
+            raise InvalidDecisionError(f"invalid shot status '{status}'")
+        self.update_shot(shot_id, status, feedback, actor="creator")
 
     def set_guidance(self, instruction: str, priority: str, timestamp: str) -> None:
         with self._lock:
@@ -194,6 +285,7 @@ class AppState:
                 "shots": copy.deepcopy(self.shots),
                 "latest_guidance": dict(self.latest_guidance),
                 "metrics": dict(self.metrics),
+                "source": dict(self.source),
             }
 
     @property

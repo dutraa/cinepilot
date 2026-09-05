@@ -45,3 +45,23 @@ Only metrics mapped to a verified decision-maker scoreboard may become headline 
 - Failed, malformed, and rejected attempts stay in denominators.
 - Every reported percentage includes numerator, denominator, and `n`.
 - Results from synthetic footage are labeled synthetic.
+- Provenance strata (synthetic, synthetic-fallback, prerecorded-file,
+  live-rtmp/rtsp/webcam) are never pooled in a single denominator.
+
+## Future real-drone evaluation
+
+Any evaluation on real drone footage must additionally:
+
+- use held-out footage that never appears in prompt examples;
+- remain separate from synthetic and fixture evidence;
+- include failed and malformed model attempts in denominators;
+- use an independent reviewer (not the prompt author alone);
+- report numerator, denominator, and sample size for every figure;
+- distinguish live-drone observation (CinePilot watched a real stream) from
+  creator-performed flight execution (the creator acted on a recommendation
+  and captured the shot);
+- make no claims about improved shots, fewer retakes, safer flight, or
+  cinematographer replacement without a measured comparator.
+
+Until that evaluation exists, real-source metrics (frame age, FPS,
+reconnect counts, schema validity) are engineering diagnostics only.

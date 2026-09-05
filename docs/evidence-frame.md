@@ -31,6 +31,26 @@ The team must obtain the evaluator rubric or a creator's existing review workflo
 
 Engineering metrics such as latency, frame rate, and schema validity are supporting rows and cannot substitute for the missing scoreboard.
 
+## Provenance strata
+
+Evidence is recorded in separate, never-pooled strata, carried on every
+event-log record and source snapshot:
+
+- `synthetic` — the generated demo scene;
+- `synthetic-fallback` — generated frames explicitly enabled after a real-source failure;
+- `prerecorded-file` — local fixture or held-out clips;
+- `live-rtmp` / `live-rtsp` / `live-webcam` — real observation streams;
+- `gemini` — model outputs (valid, invalid, and malformed attempts);
+- creator actions (`actor="creator"`) — selections, dismissals, and manual completion marks.
+
+A run's claims may only cite the stratum it actually used. Live-drone
+observation (CinePilot watched a real stream) is a weaker claim than
+creator-performed flight execution (the creator acted on a recommendation
+and captured the shot); the two must be reported separately. Engineering
+diagnostics — latency, FPS, frame validity, reconnect counts, schema
+validity — remain supporting metrics and never become headline outcomes
+without a verified decision-maker scoreboard.
+
 ## Baseline plan
 
 Before the first demo, run 5–10 representative clips through:

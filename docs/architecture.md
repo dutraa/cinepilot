@@ -18,16 +18,46 @@ The system is advisory. It does not control a drone, edit footage, or claim that
 ## Data flow
 
 ```text
-VideoStreamManager
-  -> DirectorAgent frame sample
+drone camera -> DJI Fly/Pilot or bridge -> RTMP/RTSP server
+  -> VideoStreamManager (status machine + provenance)
+  -> DirectorAgent fresh-frame sample (stale frames withheld)
   -> Gemini Live session
   -> publish_cinematic_critique tool
   -> Pydantic validation
   -> AppState publication and deduplication
   -> EventLog / Grafana
-  -> SSE and /api/state
-  -> critique UI
+  -> SSE and /api/state (merged with live source snapshot)
+  -> critique UI -> creator decision -> creator marks capture completed
 ```
+
+## Source status machine
+
+`VideoStreamManager` tracks real sources (rtmp, rtsp, webcam, file) through
+an explicit status machine exposed on `/health`, `/api/state`, and SSE:
+
+```text
+connecting -> live -> stale -> disconnected -> reconnecting -> ...
+                                 -> fallback (only when explicitly allowed)
+stopped (terminal)
+```
+
+Each snapshot carries requested vs. active source, protocol, a redacted
+stream URL (credentials and query strings are never logged or exposed),
+frame age, measured FPS, frame counters, reconnect count, fallback flag, and
+the failure reason. On disconnect the last frame is dropped so stale imagery
+is never presented as current; reconnects use exponential backoff. Synthetic
+fallback for a real source requires explicit opt-in
+(`--allow-synthetic-fallback`, `--demo-mode`, or `ALLOW_SYNTHETIC_FALLBACK`);
+otherwise a real-drone failure stays visible and fails safely.
+
+## Advisory-only boundary
+
+CinePilot never controls the drone. There are no flight commands, waypoint
+or gimbal APIs, takeoff/landing calls, or SDK control paths anywhere in the
+system, and the Gemini system prompt states the model must not generate
+them or certify that any route is safe. The model cannot mark a shot
+COMPLETED — only the creator can, via `POST /api/shots/{shot_id}`, after
+manually flying and capturing the shot.
 
 Intent flows in the opposite direction:
 
@@ -51,12 +81,14 @@ Server-owned critique fields are critique ID, tweak ID, observation ID, timestam
 
 - Gemini disconnect: preserve the current intent and resend it after reconnect.
 - Invalid model payload: record a rejection and leave canonical critique state unchanged.
+- Malformed or unknown tool call: count it, log it with `gemini` provenance, keep the agent running.
 - Duplicate critique: suppress within the configured cooldown window.
 - Duplicate action: return the existing status without incrementing counters.
 - Invalid action transition: return HTTP 409.
 - Unknown critique or tweak: return HTTP 404.
 - Event-log failure: log the failure but keep the live director running.
-- Source failure: retain the existing synthetic fallback, but expose the active source visibly.
+- Real source failure: report `disconnected`/`reconnecting`, drop the stale frame, stop feeding Gemini, retry with backoff. Synthetic fallback only on explicit opt-in, and always labeled `fallback` / `synthetic-fallback`.
+- Stale frames: never sent to Gemini as current observations (`frames_skipped_stale` counts them) and never rendered as the current monitor view.
 
 ## Deliberate simplifications
 
