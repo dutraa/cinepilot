@@ -1,12 +1,12 @@
 # CinePilot
 
-**An Agentic Aerial Cinematography Director**
+**An Advisory AI Cinematic Decision Engine**
 
-CinePilot connects a live drone video feed to the Google Gemini Live API and turns it into an advisory AI film director. Gemini watches footage in real time, compares it with a creator-provided shot intent, returns one to three structured cinematic tweaks, maintains the existing shot-list context, and can speak concise manual flight cues in the Director's Monitor dashboard.
+CinePilot connects live, prerecorded, or synthetic footage to the Google Gemini Live API and turns it into an advisory cinematic decision engine. Gemini watches footage in real time, compares it with a creator-provided story or shot intent, returns one to three structured cinematic tweaks, and can recommend what shot should be captured next to advance the story. The creator remains in control of approval and flight.
 
 ## Cinematic Tweak Engine
 
-The product loop is:
+The current product loop is:
 
 ```text
 Set shot intent -> watch the shot -> diagnose the highest-impact problem
@@ -15,6 +15,18 @@ Set shot intent -> watch the shot -> diagnose the highest-impact problem
 ```
 
 The critique is the canonical product output. A critique contains a summary and up to three tweaks, each with a category, diagnosis, recommendation, rationale, priority, and optional spoken cue. The system is advisory: it does not control the drone or edit footage automatically.
+
+The next demo extends this into a story-aware coverage loop:
+
+```text
+load mock story -> watch current shot -> identify current beat and missing coverage
+-> recommend two or three next shots -> creator selects one -> capture manually
+-> mark coverage complete -> evaluate the next result
+```
+
+The seeded story and exact walkthrough are in `docs/demo-script.md`. The
+story-aware contracts and deterministic mock loop are implemented locally; live
+Gemini story reasoning remains separately labeled and requires a configured key.
 
 The current implementation is intentionally local and session-scoped. It writes critique and creator-action events to an append-only JSONL log for demo evidence and can optionally publish tool calls and telemetry to Grafana Loki.
 
@@ -53,6 +65,16 @@ flowchart LR
 - **Right panel** — the ER2 shot list with color-coded status badges and the director's latest feedback per shot.
 - **Bottom banner** — the most recent guidance cue; `WARNING` and `URGENT` cues glow and pulse for visibility.
 - **Header** — glowing status pills for Gemini (Connected / Connecting / Disconnected) and Grafana (Live / Dry Run), plus a mute toggle for audio guidance.
+
+The story-aware dashboard now answers: what beat are we in, what did the current shot prove, what is missing, and which next shot can advance the story. Deterministic fixture behavior is labeled separately from live Gemini behavior.
+
+The story-first dashboard also includes an advisory Visualize panel. With a
+synthetic, prerecorded, webcam, RTSP, or RTMP source, the creator can freeze the
+latest real-place frame, request exactly three fixed 10-second concept
+animations, select one, and receive a manual capture brief. The response shows
+source provenance, snapshot dimensions, renderer version, and render-quality
+notes. The concepts are illustrative 2D references, not flight truth, obstacle
+maps, spatial reconstruction, or evidence that the captured shot improved.
 
 ## Quick Start
 
@@ -94,6 +116,13 @@ No drone handy? Start with the built-in synthetic aerial scene:
 
 ```bash
 python main.py --source synthetic
+```
+
+To run the repeatable story-aware mock demo without a Gemini key, drone, RTMP,
+or Grafana:
+
+```bash
+python main.py --source synthetic --demo-mode
 ```
 
 Then open **http://127.0.0.1:8000** in your browser.
@@ -165,6 +194,16 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 | `POST /api/intent` | Set the creator's current shot intent. |
 | `POST /api/critiques/{critique_id}/tweaks/{tweak_id}/decision` | Mark a tweak accepted, acted, or dismissed (creator-only). |
 | `POST /api/shots/{shot_id}` | Creator-only shot lifecycle update — the only path that can mark a shot `COMPLETED`. |
+| `GET /api/story` | Return the story, ordered beats, active beat, versions, and provenance. |
+| `POST /api/story/beat` | Activate or skip a beat through the state machine. |
+| `GET /api/coverage` | Return captured, covered, and missing story proof. |
+| `GET /api/recommendations` | Return latest recommendations and history. |
+| `POST /api/recommendations` | Publish a validated manual recommendation batch. |
+| `POST /api/recommendations/{id}/decision` | Select, complete, or dismiss a recommendation. |
+| `POST /api/visualizations` | Request exactly three deterministic 10-second concepts for the current story context and frozen source observation. |
+| `GET /api/visualizations` | List bounded session-local visualization jobs. |
+| `GET /api/visualizations/{job_id}` | Return one visualization job and its linked previews. |
+| `GET /api/visualizations/{job_id}/source-frame` | Return the server-frozen JPEG for browser animation while the bounded session job is retained. |
 | `GET /health` | JSON system status: full source snapshot (status, provenance, frame age, FPS, reconnects, redacted URL), Gemini/Grafana status, frame counters. |
 
 ## Project Structure
@@ -183,10 +222,14 @@ cinepilot/
 ├── server.py             # FastAPI app, thread-safe AppState, MJPEG + SSE endpoints
 ├── grafana_publisher.py  # Non-blocking Loki telemetry (background thread / dry-run mode)
 ├── config.py             # pydantic-settings configuration
+├── story_demo.py          # Strict seeded story fixture loader
+├── demo_provider.py       # Explicit deterministic recommendation provider
 ├── templates/
 │   └── index.html        # Dark-mode Director's Monitor dashboard
-├── docs/                 # Evidence frame, architecture, evaluation, demo, and issues
-├── fixtures/             # Held-out evaluation manifest template
+├── AGENTS.md             # Operating contract for coding agents
+├── everythings.md        # Compact source-of-truth project map
+├── docs/                 # Evidence frame, spec, architecture, decisions, evaluation, demo, issues
+├── fixtures/             # Seeded story and held-out evaluation manifest
 ├── requirements.txt
 └── .env.example
 ```

@@ -14,7 +14,7 @@ def test_dashboard_contains_source_provenance_surfaces() -> None:
     # Source status strip and real/synthetic badge.
     for element_id in (
         "sourcePill",
-        "ssePill",
+        "connectionStatus",
         "realBadge",
         "srcStatus",
         "srcFrameAge",
@@ -28,3 +28,29 @@ def test_dashboard_contains_source_provenance_surfaces() -> None:
     assert "advisory" in html.lower()
     # Model text must be rendered as text, never as markup.
     assert "textContent" in html
+
+
+def test_dashboard_contains_story_coverage_decision_surface() -> None:
+    html = Path(__file__).parents[1].joinpath("templates", "index.html").read_text(encoding="utf-8")
+    for element_id in [
+        "storyTitle",
+        "storyLogline",
+        "beatRail",
+        "currentShotContribution",
+        "coveragePanel",
+        "recommendationPanel",
+        "provenancePill",
+        "visualizationPanel",
+        "visualizeBtn",
+        "visualizationStatus",
+    ]:
+        assert f'id="{element_id}"' in html
+    assert "/api/recommendations/" in html
+    assert "/api/visualizations" in html
+    assert "AI visualization — illustrative creative reference, not flight truth." in html
+    assert "duration_seconds:10, variation_count:3" in html
+    assert "renderer_version" in html
+    assert "quality_status" in html
+    assert "source_frame_available" in html
+    assert "textContent" in html
+    assert "EventSource(\"/events\")" in html

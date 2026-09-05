@@ -23,7 +23,7 @@ from google import genai
 from google.genai import types
 
 from config import settings
-from director_prompt import SYSTEM_INSTRUCTION, intent_message
+from director_prompt import SYSTEM_INSTRUCTION, intent_message, story_message
 from grafana_publisher import GrafanaPublisher
 from tools import DIRECTOR_TOOLS, execute_tool
 from video_stream import VideoStreamManager
@@ -57,6 +57,7 @@ class DirectorAgent:
         self._rolling_fps = 0.0
         self._latency_ms = 0.0
         self._last_intent_version = 0
+        self._last_story_context_version = 0
         self._observation_counter = 0
         self._last_observation_id = "unknown-observation"
         self._gemini_reconnects = 0
@@ -72,6 +73,10 @@ class DirectorAgent:
 
     async def run(self) -> None:
         """Main loop: connect, stream, and reconnect on failure."""
+        if self.app_state.snapshot()["provenance"]["mode"] == "deterministic_demo":
+            self.app_state.update_metrics(gemini_status="Deterministic Demo")
+            await self._stop_event.wait()
+            return
         if not settings.GEMINI_API_KEY:
             logger.error(
                 "GEMINI_API_KEY is not set. The Director's Monitor will run, "
@@ -141,6 +146,7 @@ class DirectorAgent:
         ) as session:
             logger.info("Gemini Live session established")
             self.app_state.update_metrics(gemini_status="Connected")
+            await self._sync_story(session, force=True)
             await self._sync_intent(session, force=True)
 
             sender = asyncio.create_task(self._frame_sender(session))
@@ -181,6 +187,7 @@ class DirectorAgent:
         interval = max(settings.FRAME_INTERVAL_SEC, 0.1)
         while not self._stop_event.is_set():
             started = time.monotonic()
+            await self._sync_story(session)
             await self._sync_intent(session)
             jpeg = await asyncio.to_thread(self._sample_fresh_jpeg)
             if jpeg is not None:
@@ -247,6 +254,20 @@ class DirectorAgent:
             turn_complete=True,
         )
         self._last_intent_version = version
+
+    async def _sync_story(self, session: Any, force: bool = False) -> None:
+        """Send story context once per canonical story/coverage version."""
+        context, version = self.app_state.story_context()
+        if context is None or (not force and version == self._last_story_context_version):
+            return
+        await session.send_client_content(
+            turns=types.Content(
+                role="user",
+                parts=[types.Part(text=story_message(context, version))],
+            ),
+            turn_complete=True,
+        )
+        self._last_story_context_version = version
 
     async def _send_frame(self, session: Any, jpeg: bytes) -> None:
         """Send one JPEG frame as realtime video input.

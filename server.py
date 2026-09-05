@@ -16,14 +16,24 @@ import logging
 import time
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 import cv2
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from config import settings
 from event_log import EventLog
-from schemas import IntentUpdateRequest, ShotUpdateRequest, TweakDecisionRequest
+from schemas import (
+    IntentUpdateRequest,
+    RecommendationDecisionRequest,
+    ShotRecommendationBatchInput,
+    ShotUpdateRequest,
+    StoryBeatRequest,
+    TweakDecisionRequest,
+    VisualizationRequestInput,
+    VisualizationSourceKind,
+)
 from state import AppState, InvalidDecisionError, StateNotFoundError
 from video_stream import VideoStreamManager, render_status_frame
 
@@ -36,11 +46,17 @@ app_state = AppState(EventLog(settings.EVENT_LOG_PATH))
 
 # Injected by main.py before the server starts.
 video_manager: Optional[VideoStreamManager] = None
+demo_provider = None
 
 
 def set_video_manager(manager: VideoStreamManager) -> None:
     global video_manager
     video_manager = manager
+
+
+def set_demo_provider(provider: object | None) -> None:
+    global demo_provider
+    demo_provider = provider
 
 
 app = FastAPI(title="CinePilot Director's Monitor")
@@ -63,6 +79,190 @@ def state_snapshot_with_source() -> dict:
 @app.get("/api/state")
 async def state() -> JSONResponse:
     return JSONResponse(state_snapshot_with_source())
+
+
+@app.get("/api/story")
+async def story() -> JSONResponse:
+    snapshot = app_state.snapshot()
+    return JSONResponse(
+        {
+            "story": snapshot["story"],
+            "story_version": snapshot["story_version"],
+            "story_context_version": snapshot["story_context_version"],
+            "beats": snapshot["beats"],
+            "active_beat": snapshot["active_beat"],
+            "beat_statuses": snapshot["beat_statuses"],
+            "provenance": snapshot["provenance"],
+        }
+    )
+
+
+@app.post("/api/story/beat")
+async def update_story_beat(payload: StoryBeatRequest) -> JSONResponse:
+    try:
+        if payload.action == "skip":
+            app_state.skip_active_beat(payload.beat_id)
+        else:
+            app_state.set_active_beat(payload.beat_id)
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    snapshot = app_state.snapshot()
+    return JSONResponse(
+        {"ok": True, "active_beat": snapshot["active_beat"], "beats": snapshot["beats"]}
+    )
+
+
+@app.get("/api/coverage")
+async def coverage() -> JSONResponse:
+    snapshot = app_state.snapshot()
+    return JSONResponse(
+        {
+            "coverage": snapshot["coverage"],
+            "covered_coverage": snapshot["covered_coverage"],
+            "missing_coverage": snapshot["missing_coverage"],
+            "current_shot_contribution": snapshot["current_shot_contribution"],
+            "story_version": snapshot["story_version"],
+        }
+    )
+
+
+@app.get("/api/recommendations")
+async def recommendations() -> JSONResponse:
+    snapshot = app_state.snapshot()
+    return JSONResponse(
+        {
+            "latest_recommendations": snapshot["latest_recommendations"],
+            "recommendation_history": snapshot["recommendation_history"],
+            "recommendation_decisions": snapshot["recommendation_decisions"],
+            "story_context_version": snapshot["story_context_version"],
+        }
+    )
+
+
+def _visualization_source() -> tuple[VisualizationSourceKind, str]:
+    source = video_manager.active_source if video_manager is not None else "unknown"
+    if source == "unknown" and app_state.snapshot()["provenance"].get("mode") == "deterministic_demo":
+        return VisualizationSourceKind.SYNTHETIC, "synthetic"
+    if source == "synthetic" or source.startswith("synthetic"):
+        return VisualizationSourceKind.SYNTHETIC, source
+    if source == "file":
+        return VisualizationSourceKind.FILE, source
+    if source == "webcam":
+        return VisualizationSourceKind.WEBCAM, source
+    if source == "rtsp":
+        return VisualizationSourceKind.RTSP, source
+    if source == "rtmp":
+        return VisualizationSourceKind.RTMP, source
+    return VisualizationSourceKind.LIVE, source
+
+
+def _latest_visualization_frame() -> bytes | None:
+    if video_manager is not None:
+        frame = video_manager.get_jpeg_bytes(quality=90, max_dim=1024)
+        if frame is not None:
+            return frame
+    snapshot = app_state.snapshot()
+    if snapshot["provenance"].get("mode") == "deterministic_demo":
+        return VideoStreamManager(source="synthetic").get_deterministic_synthetic_jpeg()
+    return None
+
+
+@app.post("/api/visualizations")
+async def create_visualization(payload: VisualizationRequestInput) -> JSONResponse:
+    frame = _latest_visualization_frame()
+    if frame is None:
+        raise HTTPException(status_code=409, detail="current observation is unavailable")
+    source_kind, source_label = _visualization_source()
+    try:
+        job = app_state.request_visualization(
+            payload,
+            source_frame=frame,
+            provenance=app_state.snapshot()["provenance"].get("mode", "live"),
+            source_kind=source_kind,
+            source_label=source_label,
+        )
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(job.model_dump(mode="json"))
+
+
+@app.get("/api/visualizations")
+async def list_visualizations() -> JSONResponse:
+    snapshot = app_state.snapshot()
+    return JSONResponse(
+        {
+            "visualizations": snapshot["visualization_jobs"],
+            "jobs": snapshot["visualization_jobs"],
+            "latest_visualization_job": snapshot["latest_visualization_job"],
+        }
+    )
+
+
+@app.get("/api/visualizations/{job_id}")
+async def get_visualization(job_id: str) -> JSONResponse:
+    job = next(
+        (item for item in app_state.snapshot()["visualization_jobs"] if item["job_id"] == job_id),
+        None,
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"visualization job not found: {job_id}")
+    return JSONResponse(job)
+
+
+@app.get("/api/visualizations/{job_id}/source-frame")
+async def get_visualization_source_frame(job_id: str) -> Response:
+    try:
+        frame = app_state.get_visualization_source_frame(job_id)
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(content=frame, media_type="image/jpeg")
+
+
+@app.post("/api/recommendations")
+async def publish_recommendations(payload: ShotRecommendationBatchInput) -> JSONResponse:
+    snapshot = app_state.snapshot()
+    observation_id = snapshot["current_shot_contribution"].get("observation_id") or f"manual-observation-{uuid4()}"
+    try:
+        published = app_state.publish_recommendations(
+            payload.recommendations,
+            observation_id=observation_id,
+            provenance="manual",
+        )
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(
+        {
+            "ok": True,
+            "recommendations": [item.model_dump(mode="json") for item in published],
+        }
+    )
+
+
+@app.post("/api/recommendations/{recommendation_id}/decision")
+async def decide_recommendation(
+    recommendation_id: str, payload: RecommendationDecisionRequest
+) -> JSONResponse:
+    try:
+        status = app_state.decide_recommendation(recommendation_id, payload.decision)
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if status.value == "completed" and demo_provider is not None:
+        publish_current = getattr(demo_provider, "publish_current", None)
+        if publish_current is not None:
+            publish_current(app_state)
+    return JSONResponse(
+        {"ok": True, "recommendation_id": recommendation_id, "status": status.value}
+    )
 
 
 @app.post("/api/intent")

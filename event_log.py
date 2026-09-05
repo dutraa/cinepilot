@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 logger = logging.getLogger("cinepilot.events")
 
@@ -22,7 +23,13 @@ class EventLog:
     def record(self, event: str, **payload: Any) -> None:
         if self.path is None:
             return
-        record = {"event": event, "timestamp_ms": int(time.time() * 1000), **payload}
+        record = {
+            "event_id": str(uuid4()),
+            "schema_version": 1,
+            "event": event,
+            "timestamp_ms": int(time.time() * 1000),
+            **payload,
+        }
         try:
             with self._lock:
                 self.path.parent.mkdir(parents=True, exist_ok=True)

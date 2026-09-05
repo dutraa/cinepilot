@@ -1,6 +1,7 @@
 from event_log import EventLog
 from schemas import CinematicIntent
 from state import AppState
+from story_demo import load_initial_shot, load_story_fixture
 from tools import execute_tool
 
 
@@ -50,3 +51,49 @@ def test_invalid_critique_does_not_mutate_state(tmp_path) -> None:
     assert result["ok"] is False
     assert state.snapshot()["latest_critique"] is None
     assert state.snapshot()["metrics"]["invalid_critiques"] == 1
+
+
+def test_valid_next_shot_tool_publishes_server_owned_recommendations(tmp_path) -> None:
+    state = make_state(tmp_path)
+    coverage, contribution = load_initial_shot()
+    state.load_story(load_story_fixture(), coverage, contribution, "live")
+    args = {
+        "recommendations": [
+            {
+                "beat_id": "discovery",
+                "title": "Descending reveal",
+                "story_purpose": "Let the audience find the lodge.",
+                "visual_objective": "Make the lodge grow in frame.",
+                "why_now": "Isolation is already proven.",
+                "execution_guidance": "Manually descend slowly while maintaining safe terrain clearance.",
+                "safety_notes": "Pilot checks the route and weather before capture.",
+                "priority": "WARNING",
+            },
+            {
+                "beat_id": "invitation",
+                "title": "Low approach",
+                "story_purpose": "Make the destination feel reachable.",
+                "visual_objective": "Bring the entrance forward with a calm approach.",
+                "why_now": "The wide does not yet invite arrival.",
+                "execution_guidance": "Manually approach at a restrained pace with safe stopping distance.",
+                "safety_notes": "Pilot checks people, structures, and weather before capture.",
+                "priority": "INFO",
+            },
+        ]
+    }
+
+    result = execute_tool(state, "publish_next_shot_recommendations", args, "obs-5")
+
+    assert result["ok"] is True
+    assert len(state.snapshot()["latest_recommendations"]) == 2
+    assert state.snapshot()["latest_recommendations"][0]["recommendation_id"]
+    assert "created_at" not in args["recommendations"][0]
+
+
+def test_invalid_next_shot_tool_does_not_mutate_state(tmp_path) -> None:
+    state = make_state(tmp_path)
+    result = execute_tool(state, "publish_next_shot_recommendations", {"recommendations": []})
+
+    assert result["ok"] is False
+    assert state.snapshot()["latest_recommendations"] == []
+    assert state.snapshot()["metrics"]["invalid_recommendations"] == 1

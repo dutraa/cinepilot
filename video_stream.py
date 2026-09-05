@@ -328,6 +328,14 @@ class VideoStreamManager:
             return None
         return encoded.tobytes()
 
+    def get_deterministic_synthetic_jpeg(self) -> Optional[bytes]:
+        """Return the seeded synthetic scene used when demo mode has no frame yet."""
+        frame = self._render_synthetic_frame()
+        ok, encoded = cv2.imencode(
+            ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+        )
+        return encoded.tobytes() if ok else None
+
     # ------------------------------------------------------------------
     # Capture loop
     # ------------------------------------------------------------------
