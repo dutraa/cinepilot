@@ -54,3 +54,20 @@ def test_dashboard_contains_story_coverage_decision_surface() -> None:
     assert "source_frame_available" in html
     assert "textContent" in html
     assert "EventSource(\"/events\")" in html
+
+
+def test_dashboard_exposes_visual_reference_as_a_secondary_tab() -> None:
+    html = Path(__file__).parents[1].joinpath("templates", "index.html").read_text(encoding="utf-8")
+    for marker in (
+        'role="tablist"',
+        'id="coverageDeskTab"',
+        'id="visualReferenceTab"',
+        'id="coverageDeskPanel"',
+        'id="visualReferencePanel"',
+        'id="visualizeBtn"',
+        'id="visualizationStatus"',
+    ):
+        assert marker in html
+    assert "Illustrative only" in html
+    assert "function requestVisualization" in html
+    assert '"/api/visualizations"' in html

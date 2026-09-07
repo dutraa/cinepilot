@@ -1129,3 +1129,364 @@ creative-reference flow rather than block the dashboard.
 | Provider latency or cost makes the workflow unusable | Asynchronous jobs, budgets, bounded retries, visible progress, and deterministic fallback |
 | Quality metrics become unsupported product claims | Treat them as supporting diagnostics; require the dated baseline and independent held-out review before outcome language |
 | Spatial reconstruction creates false confidence | Defer 10.6, display uncertainty, and prohibit navigation/safety interpretations |
+
+## Live Coverage Desk issue breakdown
+
+These issues convert the approved between-takes live-feed direction into
+independently verifiable tracer-bullet slices. The primary path is one local,
+session-scoped production team using an RTMP or RTSP source. Synthetic footage
+remains an explicitly labeled deterministic test path. The issues do not add
+autonomous flight, continuous AI advice, uploaded-clip primary workflows,
+persistent media storage, or production outcome claims.
+
+### Issue 11 — Creator-entered live story context and readiness
+
+**Type:** AFK
+
+**Goal:** Let a director or DP enter the complete story context required for a
+live coverage decision without relying on demo-only story seeding.
+
+**What to build:** Add a strict creator context workflow for scene/story goal,
+emotional arc, ordered beats, active beat, must-show elements, constraints, and
+current shot intent. The server owns story IDs, beat IDs, versions, timestamps,
+and provenance. The dashboard shows the saved context and a readiness summary.
+
+**Acceptance criteria:**
+
+- [ ] A live session can load story context from the dashboard without demo
+      mode or fixture seeding.
+- [ ] Incomplete context visibly identifies the missing fields and prevents
+      analysis readiness.
+- [ ] Unknown fields, client-owned IDs, statuses, timestamps, and versions are
+      rejected before state mutation.
+- [ ] Repeating an unchanged context is idempotent; a material change creates
+      a new server-owned version and invalidates stale recommendations.
+- [ ] Deterministic demo mode continues to use the same canonical contracts.
+
+**Verification:** Schema, API, state-transition, versioning, fixture-parity,
+and browser context-entry tests.
+
+**Dependencies:** None.
+
+### Issue 12 — Truthful source status and cloud-consent readiness gate
+
+**Type:** AFK
+
+**Goal:** Make it impossible for the primary UI to imply that a stale or
+disconnected source is a current live feed or that cloud analysis is allowed
+without explicit consent.
+
+**What to build:** Unify requested source, active source, source status,
+freshness, provider status, consent state, and provenance across `AppState`,
+the source manager, API, SSE, health, event log, and dashboard. Keep synthetic
+fallback opt-in and prominent.
+
+**Acceptance criteria:**
+
+- [ ] `REAL SOURCE` appears only when a current RTMP or RTSP frame exists and
+      satisfies the analysis freshness rule.
+- [ ] Stale, connecting, reconnecting, and disconnected real sources show
+      `NO LIVE SIGNAL` and disable analysis.
+- [ ] Explicit fallback shows `SYNTHETIC FALLBACK` and changes analysis
+      provenance.
+- [ ] Consent is absent by default, visible in the UI, server-recorded, and
+      required before any cloud analysis request.
+- [ ] API, SSE, health, event log, and UI agree on the same source/provenance
+      state.
+
+**Verification:** Source-failure, reconnect, stale-frame, fallback,
+consent-gate, provenance-consistency, health, SSE, and browser tests.
+
+**Dependencies:** Issue 11.
+
+### Issue 13 — Server-controlled fresh observation bursts and retention
+
+**Type:** AFK
+
+**Goal:** Capture a short, fresh, frozen evidence burst that can be safely
+handed to exactly one analysis job.
+
+**What to build:** Add server-owned observation and evidence-burst contracts,
+bounded burst capture, freshness validation, frozen-job association, and
+session-local retention/deletion state. Retain only frame metadata and hashes
+in the event log; raw frames remain temporary processing input.
+
+**Acceptance criteria:**
+
+- [ ] A burst has a server-owned observation ID, job ID, timestamps, source
+      provenance, story version, intent version, active beat, frame metadata,
+      and explicit bounds.
+- [ ] Stale frames, disconnected sources, and incomplete bursts cannot enter
+      analysis state.
+- [ ] A burst is frozen for one job and cannot be replaced by a newer frame
+      during that job.
+- [ ] Raw frames are not written to the event log and are deleted after
+      processing, failure, timeout, or cancellation.
+- [ ] Retention and deletion status is visible and auditable.
+
+**Verification:** Burst-capture, freshness, disconnect, freeze, cleanup,
+retention, cancellation, and raw-media-redaction tests.
+
+**Dependencies:** Issue 12.
+
+### Issue 14 — Deterministic explicit current-take analysis loop
+
+**Type:** AFK
+
+**Goal:** Deliver the complete between-takes workflow without requiring Gemini,
+hardware, or network access.
+
+**What to build:** Add the explicit `Analyze current take` action, analysis job
+lifecycle, deterministic provider response, and decision-first rendering. The
+deterministic provider must consume the same frozen burst and canonical context
+contracts as the live provider.
+
+**Acceptance criteria:**
+
+- [ ] Analysis starts only from an explicit creator action and only when the
+      readiness gate passes.
+- [ ] The job exposes capturing, analyzing, ready, failed, timed-out, and
+      cancelled states.
+- [ ] A ready result contains observed facts, not-established limits, missing
+      coverage, one primary recommendation, and two alternatives.
+- [ ] Duplicate requests return a safe conflict or existing job and never
+      start concurrent work.
+- [ ] Failed actions re-enable retry and do not corrupt the last trusted state.
+
+**Verification:** Deterministic end-to-end API/state/browser tests covering
+empty, loading, ready, duplicate, failure, retry, timeout, and cancellation
+states.
+
+**Dependencies:** Issues 11–13.
+
+### Issue 15 — Bounded Gemini multimodal analysis and semantic rejection
+
+**Type:** AFK
+
+**Goal:** Replace continuous primary live analysis with one bounded Gemini
+multimodal request per explicitly created analysis job.
+
+**What to build:** Add the live provider path behind the deterministic job
+contract. Send one frozen observation burst plus the structured story context
+and require strict structured output. Guard malformed tool/function-call
+arguments and reject generic, unsafe, cross-beat, or semantically invalid
+recommendations without mutating canonical state.
+
+**Acceptance criteria:**
+
+- [ ] The primary workflow performs no continuous frame streaming or spoken
+      advice while the pilot is maneuvering.
+- [ ] Each analysis job makes at most one bounded multimodal provider request.
+- [ ] Output includes diagnosis, story beat advanced, visual objective, why
+      now, manual guidance, technical plausibility, safety notes, priority,
+      and clearly labeled model uncertainty.
+- [ ] The server enforces exactly one primary recommendation and two
+      alternatives for the new workflow.
+- [ ] Malformed arguments, unknown tools, generic advice, unsafe control-like
+      text, provider errors, and timeouts are recoverable and auditable.
+
+**Verification:** Provider-adapter tests, malformed-output tests, semantic
+validation tests, duplicate/timeout/retry tests, prompt-boundary tests, and a
+real Gemini check only when a real key and session are exercised.
+
+**Dependencies:** Issue 14.
+
+### Issue 16 — Separate creator decision, acted state, and manual capture
+
+**Type:** AFK
+
+**Goal:** Let the crew choose a recommendation and confirm capture without
+turning a creator action into model proof or automatic story coverage.
+
+**What to build:** Add recommendation ranking, select/dismiss decisions with
+optional reasons, a manual capture brief, a separate acted event, and a
+creator-owned `Mark take captured` transition. Preserve the distinction between
+recommended, selected, acted, captured, and completed workflow states.
+
+**Acceptance criteria:**
+
+- [ ] Only one recommendation from the current result can be selected.
+- [ ] Conflicting or stale creator decisions return a typed conflict and leave
+      canonical state unchanged.
+- [ ] Selecting a recommendation displays story purpose, visual objective,
+      exact human-language guidance, why now, and safety notes.
+- [ ] `Mark take captured` requires a selected recommendation and records a
+      server-owned capture record and creator event.
+- [ ] Selection or capture never creates observed proof, marks an unrelated
+      beat covered, or claims usefulness.
+
+**Verification:** State-machine, API, idempotency, conflict, capture, manual
+brief, and browser interaction tests.
+
+**Dependencies:** Issue 14.
+
+### Issue 17 — Fresh follow-up evaluation of the captured take
+
+**Type:** AFK
+
+**Goal:** Evaluate the captured take against the selected recommendation using
+a new live evidence burst.
+
+**What to build:** Add follow-up evaluation jobs that capture a new observation,
+compare it with the selected recommendation, intended beat, prior missing
+coverage, and new evidence, and return a bounded evaluation outcome.
+
+**Acceptance criteria:**
+
+- [ ] Evaluation is unavailable until the creator marks the selected take
+      captured.
+- [ ] The evaluation uses a new observation ID and fresh burst, never the
+      previous analysis burst.
+- [ ] Outcomes are `addressed`, `not_addressed`, `unclear`, or
+      `insufficient_evidence`, with separate failure and cancellation states.
+- [ ] Creator capture confirmation, model evaluation, and independent
+      usefulness review remain separate records.
+- [ ] An `addressed` result does not silently mark the beat covered or claim
+      improved production quality.
+
+**Verification:** New-observation, comparison-context, outcome, failure,
+retry, cancellation, and browser evaluation-flow tests.
+
+**Dependencies:** Issues 13, 15, and 16.
+
+### Issue 18 — Replayable evidence ledger and source-aligned history
+
+**Type:** AFK
+
+**Goal:** Make every live coverage decision reconstructable without retaining
+raw production media.
+
+**What to build:** Extend the event log and coverage history with correlation
+IDs, context versions, observations, analysis attempts, recommendations,
+creator decisions, captures, evaluations, provider/source transitions, and
+retention deletion events. Expose the same history in API, SSE, and the UI.
+
+**Acceptance criteria:**
+
+- [ ] A complete run can be replayed from context entry through evaluation.
+- [ ] Valid, invalid, malformed, failed, retried, cancelled, and rejected
+      attempts remain represented in the evidence denominator.
+- [ ] Raw frame bytes, secrets, and unbounded model text are absent from the
+      event log.
+- [ ] Coverage history distinguishes observed, recommended, selected, acted,
+      captured, evaluated, addressed, unclear, and dismissed states.
+- [ ] Source provenance agrees across state, API, SSE, event log, and UI.
+
+**Verification:** Event replay, redaction, retention, provenance, denominator,
+and complete synthetic-run audit tests.
+
+**Dependencies:** Issues 13, 15, 16, and 17.
+
+### Issue 19 — Live Coverage Desk recovery and accessibility pass
+
+**Type:** AFK
+
+**Goal:** Make the primary workflow usable during a shoot and recoverable from
+every required failure state.
+
+**What to build:** Reorder the dashboard around story, source truth, analysis,
+coverage decision, capture, evaluation, and history. Move telemetry and legacy
+visualization below the primary workflow. Add accessible async status handling,
+safe model-text rendering, stale UI detection, keyboard navigation, focus
+management, reduced-motion behavior, and screen-reader announcements.
+
+**Acceptance criteria:**
+
+- [ ] The dashboard visibly handles no story, no beat, missing intent, source
+      connecting, disconnected, reconnecting, stale, unavailable provider,
+      loading, timeout, malformed response, semantic rejection, duplicate,
+      conflict, retry, cancellation, and SSE disconnection.
+- [ ] Failed actions never leave controls permanently disabled.
+- [ ] Keyboard-only navigation reaches all controls in workflow order and
+      exposes visible focus.
+- [ ] Dynamic results and errors are announced without duplicating or hiding
+      the source truth.
+- [ ] Legacy critique and visualization remain available but cannot displace
+      the primary between-takes decision workflow.
+
+**Verification:** Dashboard JavaScript parse, browser interaction matrix,
+keyboard pass, accessibility-tree review, visual review, stale-SSE test, and
+model-text/XSS fixture test.
+
+**Dependencies:** Issues 14–18.
+
+### Issue 20 — Evidence gate and real-source pilot verification
+
+**Type:** HITL
+
+**Goal:** Determine whether the implemented workflow merits a limited pilot
+without confusing implementation readiness with recommendation usefulness.
+
+**What to build:** Run the repository checks and browser verification, exercise
+real RTMP/RTSP and Gemini only when available, freeze a mechanically disjoint
+held-out set, run the timed manual comparator, obtain independent usefulness
+scores, and update claim boundaries and documentation.
+
+**Acceptance criteria:**
+
+- [ ] All required automated, syntax, smoke, secret, diff, and clean-worktree
+      checks report actual results.
+- [ ] Real Gemini and real-source checks are labeled unverified unless the
+      external systems were actually exercised.
+- [ ] Held-out cases are disjoint from prompt examples and tuning fixtures.
+- [ ] Manual and CinePilot arms use the same cases and rubric, with all failed
+      and malformed attempts retained in denominators.
+- [ ] Every reported rate includes numerator, denominator, sample size, and
+      provenance stratum.
+- [ ] Documentation states that the system is advisory only and does not
+      claim improved shots, fewer retakes, safer flight, or cinematographer
+      replacement without comparator evidence.
+
+**Verification:** Full repository verification, browser workflow review,
+source interruption/reconnect exercise, live-provider exercise when available,
+manual baseline, independent review, evidence-ledger audit, and hostile claim
+review.
+
+**Dependencies:** Issues 11–19.
+
+## Live Coverage Desk execution order and cut line
+
+Implement in dependency order:
+
+`11 → 12 → 13 → 14 → 15 → 16 → 17 → 18 → 19 → 20`
+
+Issue 14 is the deterministic release cut line: the full workflow must be
+usable without Gemini or hardware. Issue 15 is required before claiming live
+Gemini analysis. Issue 20 is required before claiming creator usefulness,
+faster decision-making, or pilot readiness.
+
+## Implementation note — Live Coverage Desk foundation (2026-09-08)
+
+The first implementation slice now establishes the primary local/session
+workflow through creator-entered story context, explicit session consent, a
+truthful source status, bounded fresh evidence bursts, strict analysis jobs,
+ranked recommendations, separate creator capture, and fresh follow-up
+evaluation. The dashboard is organized around the coverage decision; legacy
+critique and visualization remain secondary compatibility surfaces.
+
+The state transitions are:
+
+```text
+story context entered -> consent granted -> source ready
+  -> analysis requested -> capturing -> analyzing -> ready|failed|timed_out|cancelled
+  -> recommended -> selected|dismissed -> acted (creator marks captured)
+  -> follow-up requested -> fresh burst -> addressed|not_addressed|unclear|insufficient_evidence
+```
+
+Every analysis observation records server-owned IDs, story/intent versions,
+timestamps, source requested/active values, provenance, freshness limit, and
+frame metadata. Raw frames are transient worker data and are deleted after
+processing; raw media is not written to the event log. Selection, creator
+capture, model evaluation, and independent usefulness review are separate
+claims and records. No result currently supports claims of improved
+production quality, fewer retakes, safer flight, faster decisions, or
+cinematographer replacement. Those claims require the evidence frame,
+denominators, a manual comparator, held-out cases, and independent review.
+
+The Visual Reference slice is now exposed as an explicit secondary tab rather
+than a disabled control in the system-status disclosure. It consumes the same
+bounded current source frame and can adapt the primary take recommendations at
+the visualization boundary without merging visual-reference decisions into
+coverage state. Its three previews remain illustrative screen-space concepts;
+they do not create coverage proof, flight commands, or production-quality
+claims.

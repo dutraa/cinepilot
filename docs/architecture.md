@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-CinePilot watches a live, prerecorded, or synthetic video source against a creator-provided story and shot intent. Gemini or the explicit deterministic provider returns one to three prioritized cinematic tweaks or recommendations for missing story coverage. The creator decides whether a recommendation is selected, completed, or dismissed.
+CinePilot watches a live, prerecorded, or explicitly synthetic video source against a creator-entered story and shot intent. The primary workflow is an explicit between-takes coverage decision: the creator requests one bounded evidence burst, then Gemini or the deterministic test provider returns exactly one ranked next shot and two alternatives. The creator decides whether a recommendation is selected, captured, or dismissed, and a separate fresh burst evaluates whether the selected coverage appears addressed.
 
 The system is advisory. It does not control a drone, edit footage, or claim that a recommendation was executed unless the creator marks it acted.
 
@@ -20,11 +20,10 @@ The system is advisory. It does not control a drone, edit footage, or claim that
 ```text
 drone camera -> DJI Fly/Pilot or bridge -> RTMP/RTSP server
   -> VideoStreamManager (status machine + provenance)
-  -> DirectorAgent fresh-frame sample (stale frames withheld)
-  -> Gemini Live session or deterministic demo provider
-  -> validated critique/recommendation tool
-  -> Pydantic validation
-  -> AppState publication, story coverage, visualization jobs, and deduplication
+  -> explicit server-controlled fresh evidence burst (stale frames withheld)
+  -> one bounded Gemini multimodal request or deterministic test provider
+  -> strict Pydantic and semantic validation
+  -> AppState publication, recommendation decision, capture, and follow-up evaluation
   -> EventLog / Grafana
   -> SSE and /api/state (merged with live source snapshot)
   -> critique and coverage UI -> creator decision -> creator marks capture completed
@@ -50,6 +49,12 @@ fallback for a real source requires explicit opt-in
 (`--allow-synthetic-fallback`, `--demo-mode`, or `ALLOW_SYNTHETIC_FALLBACK`);
 otherwise a real-drone failure stays visible and fails safely.
 
+`is_real_source` is true only when the active source is a real source, its
+status is `live`, and its newest frame is within the analysis freshness limit.
+Disconnected and stale real sources therefore cannot be presented as current
+real evidence. Synthetic fallback is always visibly labeled and is a separate
+provenance stratum.
+
 ## Advisory-only boundary
 
 CinePilot never controls the drone. There are no flight commands, waypoint
@@ -69,11 +74,11 @@ Intent form
   -> Gemini text context update
 ```
 
-Story context follows the same versioned synchronization boundary. The agent
-sends the story brief, active beat, covered and missing beats, current-shot
-contribution, and previous creator decisions on connection and when the story
-context version changes. The deterministic provider uses the same validated
-publication method and cannot bypass the state machine.
+The primary live path enters story context through `POST /api/story`; the
+server assigns story and beat IDs and owns all versions. Story context follows
+the same versioned synchronization boundary. The legacy DirectorAgent can be
+enabled explicitly for backward-compatible critique experiments, but it is
+disabled by default and never defines the primary live coverage loop.
 
 ## Contracts
 
@@ -83,9 +88,31 @@ publication method and cannot bypass the state machine.
 
 Server-owned critique fields are critique ID, tweak ID, observation ID, timestamp, prompt version, and intent version.
 
-The story-aware slice adds `StoryBrief`, `StoryBeat`, `ShotCoverage`, and `ShotRecommendation`. A recommendation must include the story purpose, visual objective, why-now explanation, manual execution guidance, and safety notes. Story and recommendation status are server-owned. See `docs/SPEC.md` for the reference contract and `docs/decisions/ADR-001-story-aware-demo-boundary.md` for the boundary decision.
+The story-aware slice adds `StoryBrief`, `StoryBeat`, `ShotCoverage`, and
+`ShotRecommendation`. The primary live slice adds strict contracts for
+`ObservationBurst`, `AnalysisJob`, `TakeRecommendation`, `CaptureRecord`, and
+`EvaluationRecord`. A recommendation must include diagnosis, story purpose,
+visual objective, why-now explanation, manual execution guidance, technical
+plausibility, safety notes, and clearly labeled model uncertainty. Raw frames
+are held only in the bounded worker scope and are deleted after processing;
+only frame metadata and retention status are logged. See `docs/SPEC.md` for
+the reference contract.
 
-The Visualize slice adds strict `VisualizationRequestInput`,
+The primary lifecycle is:
+
+```text
+creator-entered story + intent
+  -> consent + current source readiness
+  -> requested -> capturing -> analyzing -> ready|failed|timed_out|cancelled
+  -> recommended -> selected|dismissed -> acted (creator marks captured)
+  -> new follow-up burst -> addressed|not_addressed|unclear|insufficient_evidence
+```
+
+Selection is not capture. Capture is not observed proof. Evaluation is not an
+independent usefulness review and an `addressed` result does not automatically
+mark a beat covered or prove production quality improved.
+
+The Visual Reference tab adds strict `VisualizationRequestInput`,
 `VisualizationJobStatus`, `VisualizationQualityStatus`,
 `VisualizationSourceKind`, `AnimationProfile`, `AnimationProfileSpec`,
 `VisualizationPreview`, and `VisualizationJob` contracts. A single in-process
@@ -97,6 +124,24 @@ ready state. The server owns every job, observation hash, preview, timestamp,
 status, recommendation link, version, source label, and provenance. The preview
 attaches to an existing recommendation; it does not introduce a second
 decision state machine.
+
+The tab is secondary to the Live Coverage Desk. It is opened explicitly by the
+creator, remains unavailable until a current story context and three
+recommendations exist, and presents the three concepts as illustrative
+screen-space references over the frozen source frame. It never displaces the
+between-takes coverage decision or presents a concept as live evidence.
+
+The tab is secondary to the Live Coverage Desk. It is opened explicitly by the
+creator, remains unavailable until a current story context and three
+recommendations exist, and presents the three concepts as illustrative
+screen-space references over the frozen source frame. It never displaces the
+between-takes coverage decision or presents a concept as live evidence.
+
+The tab is secondary to the Live Coverage Desk. It is opened explicitly by the
+creator, remains unavailable until a current story context and three
+recommendations exist, and presents the three concepts as illustrative
+screen-space references over the frozen source frame. It never displaces the
+between-takes coverage decision or presents a concept as live evidence.
 
 ## Failure behavior
 
@@ -114,12 +159,20 @@ decision state machine.
 - Stale frames: never sent to Gemini as current observations (`frames_skipped_stale` counts them) and never rendered as the current monitor view.
 - Visualization renderer failure: mark only the job failed, remove its temporary source frame, and leave story, recommendation, and coverage state unchanged; a retry reuses the failed job ID and is still bounded by the one-worker rule.
 - Visualization selection: reuse recommendation transitions; selection exposes a manual capture brief but never marks capture, coverage, or quality improvement.
+- Analysis duplicate: a second request while a job is requested, capturing, or analyzing returns `409`; failed jobs can be retried with a new explicit request.
+- Analysis cancellation and provider timeout: mark only the job terminal, delete transient raw frames, preserve the rest of canonical state, and re-enable retry.
+- Follow-up evaluation: requires a creator capture record and a new observation ID; it never reuses the initial burst.
 
 ## Deliberate simplifications
 
 State is session-local and history is capped. The JSONL event log is sufficient for the first evidence run; a database is deferred until multiple users or persistent projects exist.
 
-The first story demo uses one `DirectorAgent`, one seeded story, five beats, a deterministic provider, and manual creator selection. Specialist agents, autonomous flight, screenplay parsing, and editing integrations remain out of scope until recommendation usefulness is evidenced.
+The first story demo uses one seeded story and deterministic provider only when
+`--demo-mode` is explicitly selected. The primary live path requires creator
+entry through the story form and explicit cloud consent. Specialist agents,
+autonomous flight, screenplay parsing, continuous in-flight advice, and
+editing integrations remain out of scope until recommendation usefulness is
+evidenced.
 
 Visualization persistence, galleries, live video generation, 3D reconstruction,
 and autonomous drone behavior remain out of scope for the deterministic release.

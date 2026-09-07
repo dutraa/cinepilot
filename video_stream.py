@@ -255,7 +255,15 @@ class VideoStreamManager:
                 "stream_url": redact_stream_url(self._stream_url_for_source()),
                 "status": status.value,
                 "status_reason": self._status_reason,
-                "is_real_source": self.requested_source in REAL_SOURCES,
+                # A configured network source is not a current real source until
+                # the manager has a live, fresh frame. This keeps API, SSE, and
+                # UI provenance truthful during disconnects and stale periods.
+                "is_real_source": (
+                    self.active_source in {"rtmp", "rtsp", "webcam", "file"}
+                    and status == SourceStatus.LIVE
+                    and age is not None
+                    and age <= settings.SOURCE_MAX_FRAME_AGE_SEC
+                ),
                 "provenance": self._provenance(),
                 "first_frame_at": self._first_frame_wall,
                 "last_frame_at": self._latest_frame_wall,

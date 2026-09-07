@@ -15,16 +15,30 @@ from domain import ALLOWED_SHOT_IDS, ALLOWED_STATUSES, SHOT_DEFINITIONS
 from event_log import EventLog
 from config import settings
 from schemas import (
+    AnalysisJob,
+    AnalysisJobKind,
+    AnalysisJobStatus,
+    CaptureRecord,
+    ConsentState,
     CinematicCritique,
     CinematicIntent,
     Decision,
+    EvaluationOutcome,
+    EvaluationRecord,
+    ObservationBurst,
     RecommendationDecision,
+    RecommendationRole,
+    RetentionStatus,
     ShotCoverage,
     ShotRecommendation,
     ShotRecommendationInput,
     ShotRecommendationStatus,
     StoryBeatStatus,
     StoryBrief,
+    StoryContextInput,
+    TakeAnalysisResult,
+    TakeRecommendation,
+    TweakCategory,
     TweakStatus,
     VisualizationJob,
     VisualizationJobStatus,
@@ -62,6 +76,13 @@ class AppState:
         self.story: StoryBrief | None = None
         self._story_version = 0
         self._story_context_version = 0
+        self.consent = ConsentState()
+        self.analysis_jobs: dict[str, AnalysisJob] = {}
+        self._analysis_job_order: list[str] = []
+        self.observation_bursts: dict[str, ObservationBurst] = {}
+        self.take_recommendations: dict[str, TakeRecommendation] = {}
+        self.capture_records: dict[str, CaptureRecord] = {}
+        self.evaluation_records: dict[str, EvaluationRecord] = {}
         self.active_beat_id: str | None = None
         self.beat_statuses: dict[str, StoryBeatStatus] = {}
         self.coverage: list[ShotCoverage] = []
@@ -131,6 +152,328 @@ class AppState:
             "allow_synthetic_fallback": False,
         }
 
+    def load_story_context(self, context: StoryContextInput) -> int:
+        """Load creator-entered live-workflow context with server-owned IDs."""
+        story_id = str(uuid4())
+        beats = [
+            {
+                "beat_id": str(uuid4()),
+                "title": beat.title,
+                "story_job": beat.story_job,
+                "required_visual_proof": beat.required_visual_proof,
+                "status": StoryBeatStatus.ACTIVE if index == context.active_beat_index else StoryBeatStatus.PENDING,
+            }
+            for index, beat in enumerate(context.beats)
+        ]
+        story = StoryBrief(
+            story_id=story_id,
+            title=context.title,
+            logline=context.logline,
+            emotional_arc=context.emotional_arc,
+            visual_style=context.visual_style,
+            must_show=context.must_show,
+            constraints=context.constraints,
+            beats=beats,
+        )
+        version = self.load_story(story, provenance=self.provenance.get("mode", "live"))
+        self.set_intent(context.shot_intent)
+        with self._lock:
+            self._event_log.record(
+                "story_context_entered",
+                story_id=story_id,
+                story_version=version,
+                intent_version=self._intent_version,
+                active_beat_id=self.active_beat_id,
+            )
+        return version
+
+    def set_consent(self, granted: bool) -> ConsentState:
+        """Set session-scoped cloud-analysis consent and audit the decision."""
+        with self._lock:
+            now = self._now_iso()
+            if granted:
+                self.consent = ConsentState(granted=True, granted_at=now)
+            else:
+                self.consent = ConsentState(granted=False, revoked_at=now)
+            self._version += 1
+            self._event_log.record(
+                "cloud_consent_changed",
+                granted=granted,
+                scope="session",
+            )
+            return self.consent.model_copy(deep=True)
+
+    def request_analysis_job(self, kind: AnalysisJobKind = AnalysisJobKind.TAKE_ANALYSIS) -> AnalysisJob:
+        """Create an explicit, idempotency-free analysis job after readiness checks."""
+        with self._lock:
+            if self.story is None:
+                raise InvalidDecisionError("story brief is required before analysis")
+            if self.active_beat_id is None:
+                raise InvalidDecisionError("an active story beat is required before analysis")
+            if self.intent is None:
+                raise InvalidDecisionError("shot intent is required before analysis")
+            if not self.consent.granted:
+                raise InvalidDecisionError("cloud analysis consent is required")
+            active = self._active_analysis_job_locked()
+            if active is not None:
+                raise InvalidDecisionError("another analysis job is already running")
+            job = AnalysisJob(
+                job_id=str(uuid4()),
+                kind=kind,
+                requested_at=self._now_iso(),
+                story_version=self._story_version,
+                intent_version=self._intent_version,
+                beat_id=self.active_beat_id,
+            )
+            self.analysis_jobs[job.job_id] = job
+            self._analysis_job_order.append(job.job_id)
+            self._version += 1
+            self._event_log.record(
+                "analysis_requested",
+                job_id=job.job_id,
+                kind=kind.value,
+                story_version=job.story_version,
+                intent_version=job.intent_version,
+                beat_id=job.beat_id,
+            )
+            return job.model_copy(deep=True)
+
+    def _active_analysis_job_locked(self) -> AnalysisJob | None:
+        for job_id in reversed(self._analysis_job_order):
+            job = self.analysis_jobs.get(job_id)
+            if job and job.status in {
+                AnalysisJobStatus.REQUESTED,
+                AnalysisJobStatus.CAPTURING,
+                AnalysisJobStatus.ANALYZING,
+            }:
+                return job
+        return None
+
+    def update_analysis_status(self, job_id: str, status: AnalysisJobStatus) -> AnalysisJob:
+        with self._lock:
+            job = self.analysis_jobs.get(job_id)
+            if job is None:
+                raise StateNotFoundError(f"analysis job not found: {job_id}")
+            job.status = status
+            if status == AnalysisJobStatus.CAPTURING and job.started_at is None:
+                job.started_at = self._now_iso()
+            self._version += 1
+            self._event_log.record("analysis_status", job_id=job_id, status=status.value)
+            return job.model_copy(deep=True)
+
+    def publish_take_analysis(
+        self,
+        job_id: str,
+        burst: ObservationBurst,
+        result: TakeAnalysisResult,
+        provenance: str,
+    ) -> AnalysisJob:
+        with self._lock:
+            job = self.analysis_jobs.get(job_id)
+            if job is None:
+                raise StateNotFoundError(f"analysis job not found: {job_id}")
+            if job.kind != AnalysisJobKind.TAKE_ANALYSIS:
+                raise InvalidDecisionError("job is not a take analysis")
+            if burst.story_version != self._story_version or burst.intent_version != self._intent_version:
+                raise InvalidDecisionError("analysis context became stale; retry with a fresh burst")
+            if burst.beat_id != job.beat_id:
+                raise InvalidDecisionError("observation beat does not match analysis job")
+            recommendations: list[TakeRecommendation] = []
+            for index, item in enumerate(result.recommendations):
+                recommendation = TakeRecommendation(
+                    **item.model_dump(mode="json"),
+                    recommendation_id=str(uuid4()),
+                    analysis_job_id=job_id,
+                    observation_id=burst.observation_id,
+                    role=RecommendationRole.PRIMARY if index == 0 else RecommendationRole.ALTERNATIVE,
+                    rank=index + 1,
+                    created_at=self._now_iso(),
+                    provenance=provenance,
+                )
+                recommendations.append(recommendation)
+                self.take_recommendations[recommendation.recommendation_id] = recommendation
+            job.observation_id = burst.observation_id
+            job.result = result.model_copy(deep=True)
+            job.status = AnalysisJobStatus.READY
+            job.completed_at = self._now_iso()
+            self.observation_bursts[burst.observation_id] = burst.model_copy(
+                update={"retention_status": RetentionStatus.DELETED}, deep=True
+            )
+            self._version += 1
+            self._event_log.record(
+                "analysis_ready",
+                job_id=job_id,
+                observation_id=burst.observation_id,
+                recommendation_ids=[item.recommendation_id for item in recommendations],
+                provenance=provenance,
+                retention_status="deleted",
+            )
+            return job.model_copy(deep=True)
+
+    def fail_analysis(self, job_id: str, status: AnalysisJobStatus, error: str) -> AnalysisJob:
+        with self._lock:
+            job = self.analysis_jobs.get(job_id)
+            if job is None:
+                raise StateNotFoundError(f"analysis job not found: {job_id}")
+            job.status = status
+            job.error = error[:500]
+            job.completed_at = self._now_iso()
+            self._version += 1
+            self._event_log.record("analysis_failed", job_id=job_id, status=status.value, reason=job.error)
+            return job.model_copy(deep=True)
+
+    def select_take_recommendation(self, recommendation_id: str, reason: str = "") -> TakeRecommendation:
+        with self._lock:
+            recommendation = self.take_recommendations.get(recommendation_id)
+            if recommendation is None:
+                raise StateNotFoundError(f"take recommendation not found: {recommendation_id}")
+            if recommendation.status == "selected":
+                return recommendation.model_copy(deep=True)
+            if recommendation.status != "recommended":
+                raise InvalidDecisionError("only a recommended take can be selected")
+            for item in self.take_recommendations.values():
+                if item.analysis_job_id == recommendation.analysis_job_id and item.status in {"selected", "acted"}:
+                    raise InvalidDecisionError("a recommendation from this analysis is already selected or captured")
+            recommendation.status = "selected"
+            self._version += 1
+            self._event_log.record(
+                "take_recommendation_selected",
+                recommendation_id=recommendation_id,
+                analysis_job_id=recommendation.analysis_job_id,
+                reason=reason,
+                actor="creator",
+            )
+            return recommendation.model_copy(deep=True)
+
+    def dismiss_take_recommendation(self, recommendation_id: str, reason: str = "") -> TakeRecommendation:
+        with self._lock:
+            recommendation = self.take_recommendations.get(recommendation_id)
+            if recommendation is None:
+                raise StateNotFoundError(f"take recommendation not found: {recommendation_id}")
+            if recommendation.status == "dismissed":
+                return recommendation.model_copy(deep=True)
+            if recommendation.status != "recommended":
+                raise InvalidDecisionError("only an unselected recommendation can be dismissed")
+            recommendation.status = "dismissed"
+            self._version += 1
+            self._event_log.record(
+                "take_recommendation_dismissed",
+                recommendation_id=recommendation_id,
+                reason=reason,
+                actor="creator",
+            )
+            return recommendation.model_copy(deep=True)
+
+    def mark_take_captured(self, recommendation_id: str, notes: str, provenance: str) -> CaptureRecord:
+        with self._lock:
+            recommendation = self.take_recommendations.get(recommendation_id)
+            if recommendation is None:
+                raise StateNotFoundError(f"take recommendation not found: {recommendation_id}")
+            if recommendation.status not in {"selected", "acted"}:
+                raise InvalidDecisionError("select a recommendation before marking the take captured")
+            existing = next(
+                (item for item in self.capture_records.values() if item.recommendation_id == recommendation_id),
+                None,
+            )
+            if existing is not None:
+                return existing.model_copy(deep=True)
+            recommendation.status = "acted"
+            capture = CaptureRecord(
+                capture_id=str(uuid4()),
+                recommendation_id=recommendation_id,
+                captured_at=self._now_iso(),
+                notes=notes,
+                provenance=provenance,
+            )
+            self.capture_records[capture.capture_id] = capture
+            self._version += 1
+            self._event_log.record(
+                "take_marked_captured",
+                capture_id=capture.capture_id,
+                recommendation_id=recommendation_id,
+                actor="creator",
+                provenance=provenance,
+            )
+            return capture.model_copy(deep=True)
+
+    def request_evaluation_job(self, capture_id: str) -> AnalysisJob:
+        with self._lock:
+            capture = self.capture_records.get(capture_id)
+            if capture is None:
+                raise StateNotFoundError(f"capture not found: {capture_id}")
+            recommendation = self.take_recommendations.get(capture.recommendation_id)
+            if recommendation is None:
+                raise StateNotFoundError("selected recommendation not found")
+            active = self._active_analysis_job_locked()
+            if active is not None:
+                raise InvalidDecisionError("another analysis job is already running")
+            job = AnalysisJob(
+                job_id=str(uuid4()),
+                kind=AnalysisJobKind.FOLLOW_UP_EVALUATION,
+                requested_at=self._now_iso(),
+                story_version=self._story_version,
+                intent_version=self._intent_version,
+                beat_id=recommendation.beat_id,
+            )
+            self.analysis_jobs[job.job_id] = job
+            self._analysis_job_order.append(job.job_id)
+            self._version += 1
+            self._event_log.record(
+                "evaluation_requested",
+                job_id=job.job_id,
+                capture_id=capture_id,
+                recommendation_id=recommendation.recommendation_id,
+            )
+            return job.model_copy(deep=True)
+
+    def publish_evaluation(
+        self,
+        job_id: str,
+        capture_id: str,
+        burst: ObservationBurst,
+        outcome: EvaluationOutcome,
+        explanation: str,
+        provenance: str,
+    ) -> EvaluationRecord:
+        with self._lock:
+            job = self.analysis_jobs.get(job_id)
+            capture = self.capture_records.get(capture_id)
+            if job is None or capture is None:
+                raise StateNotFoundError("evaluation context not found")
+            if job.kind != AnalysisJobKind.FOLLOW_UP_EVALUATION:
+                raise InvalidDecisionError("job is not a follow-up evaluation")
+            record = EvaluationRecord(
+                evaluation_id=str(uuid4()),
+                job_id=job_id,
+                capture_id=capture_id,
+                recommendation_id=capture.recommendation_id,
+                observation_id=burst.observation_id,
+                outcome=outcome,
+                explanation=explanation,
+                created_at=self._now_iso(),
+                provenance=provenance,
+            )
+            self.evaluation_records[record.evaluation_id] = record
+            job.observation_id = burst.observation_id
+            job.evaluation = outcome
+            job.status = AnalysisJobStatus.READY
+            job.completed_at = self._now_iso()
+            self.observation_bursts[burst.observation_id] = burst.model_copy(
+                update={"retention_status": RetentionStatus.DELETED}, deep=True
+            )
+            self._version += 1
+            self._event_log.record(
+                "evaluation_ready",
+                evaluation_id=record.evaluation_id,
+                job_id=job_id,
+                capture_id=capture_id,
+                recommendation_id=capture.recommendation_id,
+                observation_id=burst.observation_id,
+                outcome=outcome.value,
+                provenance=provenance,
+            )
+            return record.model_copy(deep=True)
+
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -185,6 +528,12 @@ class AppState:
             self.latest_recommendations = []
             self.recommendation_history = []
             self.recommendation_decisions = []
+            self.analysis_jobs = {}
+            self._analysis_job_order = []
+            self.observation_bursts = {}
+            self.take_recommendations = {}
+            self.capture_records = {}
+            self.evaluation_records = {}
             self.visualization_jobs = {}
             self._visualization_job_order = []
             self._visualization_jobs_by_fingerprint = {}
@@ -483,6 +832,50 @@ class AppState:
         }
         return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
+    def _visualization_recommendations_locked(self) -> list[ShotRecommendation]:
+        """Return the three recommendations available to the visual-reference slice.
+
+        The legacy renderer consumes ``ShotRecommendation`` objects, while the
+        primary live workflow publishes ``TakeRecommendation`` objects. Adapt
+        the latter at this boundary without merging visualization decisions
+        into the coverage decision state.
+        """
+        if len(self.latest_recommendations) >= 3:
+            return [item.model_copy(deep=True) for item in self.latest_recommendations[:3]]
+
+        grouped: dict[str, list[TakeRecommendation]] = {}
+        for item in self.take_recommendations.values():
+            grouped.setdefault(item.analysis_job_id, []).append(item)
+        for candidates in reversed(list(grouped.values())):
+            candidates = sorted(candidates, key=lambda item: item.rank)
+            if len(candidates) != 3:
+                continue
+            return [
+                ShotRecommendation(
+                    beat_id=item.beat_id,
+                    title=item.title,
+                    story_purpose=item.story_purpose,
+                    visual_objective=item.visual_objective,
+                    why_now=item.why_now,
+                    execution_guidance=item.execution_guidance,
+                    safety_notes=item.safety_notes,
+                    priority=item.priority,
+                    confidence=item.confidence,
+                    category=TweakCategory.COMPOSITION,
+                    recommendation_id=str(
+                        uuid5(NAMESPACE_URL, f"cinepilot:visual-reference:{item.recommendation_id}")
+                    ),
+                    observation_id=item.observation_id,
+                    intent_version=self._intent_version,
+                    prompt_version="take-analysis",
+                    created_at=item.created_at,
+                    provenance=item.provenance,
+                    status=ShotRecommendationStatus.SUGGESTED,
+                )
+                for item in candidates
+            ]
+        return []
+
     def request_visualization(
         self,
         request: VisualizationRequestInput,
@@ -517,9 +910,7 @@ class AppState:
             if existing_id is not None:
                 existing = self.visualization_jobs[existing_id]
                 if existing.status == VisualizationJobStatus.FAILED:
-                    recommendations = [
-                        item.model_copy(deep=True) for item in self.latest_recommendations[:3]
-                    ]
+                    recommendations = self._visualization_recommendations_locked()
                     if len(recommendations) != 3:
                         raise InvalidDecisionError(
                             "three existing shot recommendations are required for visualization"
@@ -555,9 +946,7 @@ class AppState:
                 }:
                     raise InvalidDecisionError("another visualization job is rendering")
 
-            recommendations = [
-                item.model_copy(deep=True) for item in self.latest_recommendations[:3]
-            ]
+            recommendations = self._visualization_recommendations_locked()
             if len(recommendations) != 3:
                 raise InvalidDecisionError(
                     "three existing shot recommendations are required for visualization"
@@ -681,9 +1070,6 @@ class AppState:
     def _complete_recommendation_locked(self, recommendation: ShotRecommendation) -> None:
         beat_id = recommendation.beat_id
         self._require_beat_locked(beat_id)
-        if self.active_beat_id and self.active_beat_id != beat_id:
-            if self.beat_statuses[self.active_beat_id] == StoryBeatStatus.ACTIVE:
-                self.beat_statuses[self.active_beat_id] = StoryBeatStatus.COVERED
         self.beat_statuses[beat_id] = StoryBeatStatus.COVERED
         coverage_id = (
             str(uuid5(NAMESPACE_URL, f"coverage:{recommendation.recommendation_id}"))
@@ -714,17 +1100,9 @@ class AppState:
             new_status="covered",
             recommendation_id=recommendation.recommendation_id,
         )
-        self.current_shot_contribution = {
-            "beat_id": beat_id,
-            "observation_id": recommendation.observation_id,
-            "shot_title": recommendation.title,
-            "source": self.provenance.get("source", "unknown"),
-            "proves": recommendation.visual_objective,
-            "limitations": "The next result must be evaluated separately; completion records capture, not quality improvement.",
-        }
-        self.active_beat_id = self._next_pending_beat_locked()
-        if self.active_beat_id:
-            self.beat_statuses[self.active_beat_id] = StoryBeatStatus.ACTIVE
+        # A creator completion records that the selected shot was captured; it
+        # does not create observed proof. The next observation must establish
+        # what the take visibly contributed before coverage can advance.
 
     def intent_context(self) -> tuple[CinematicIntent | None, int]:
         with self._lock:
@@ -880,6 +1258,14 @@ class AppState:
                 "timestamp": timestamp,
             }
             self._version += 1
+            self._event_log.record(
+                "guidance_set",
+                instruction=instruction,
+                priority=priority,
+                timestamp=timestamp,
+                actor="model",
+                advisory_only=True,
+            )
 
     def update_metrics(self, **kwargs: Any) -> None:
         with self._lock:
@@ -899,6 +1285,29 @@ class AppState:
                 "version": self._version,
                 "intent_version": self._intent_version,
                 "intent": self.intent.model_dump(mode="json") if self.intent else None,
+                "consent": self.consent.model_dump(mode="json"),
+                "analysis_jobs": [
+                    self.analysis_jobs[job_id].model_dump(mode="json")
+                    for job_id in self._analysis_job_order
+                    if job_id in self.analysis_jobs
+                ],
+                "latest_analysis_job": (
+                    self.analysis_jobs[self._analysis_job_order[-1]].model_dump(mode="json")
+                    if self._analysis_job_order and self._analysis_job_order[-1] in self.analysis_jobs
+                    else None
+                ),
+                "take_recommendations": [
+                    item.model_dump(mode="json") for item in self.take_recommendations.values()
+                ],
+                "capture_records": [
+                    item.model_dump(mode="json") for item in self.capture_records.values()
+                ],
+                "evaluation_records": [
+                    item.model_dump(mode="json") for item in self.evaluation_records.values()
+                ],
+                "observation_bursts": [
+                    item.model_dump(mode="json") for item in self.observation_bursts.values()
+                ],
                 "story": story_context["story"] if story_context else None,
                 "story_version": self._story_version,
                 "story_context_version": self._story_context_version,

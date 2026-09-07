@@ -53,6 +53,11 @@ class ShotRecommendationStatus(str, Enum):
     DISMISSED = "dismissed"
 
 
+class RecommendationRole(str, Enum):
+    PRIMARY = "primary"
+    ALTERNATIVE = "alternative"
+
+
 class RecommendationDecision(str, Enum):
     SELECTED = "selected"
     COMPLETED = "completed"
@@ -86,6 +91,34 @@ class AnimationProfile(str, Enum):
     DESCENDING_REVEAL = "descending_reveal"
     LATERAL_PARALLAX = "lateral_parallax"
     RESTRAINED_PULL_AWAY = "restrained_pull_away"
+
+
+class AnalysisJobKind(str, Enum):
+    TAKE_ANALYSIS = "take_analysis"
+    FOLLOW_UP_EVALUATION = "follow_up_evaluation"
+
+
+class AnalysisJobStatus(str, Enum):
+    REQUESTED = "requested"
+    CAPTURING = "capturing"
+    ANALYZING = "analyzing"
+    READY = "ready"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+
+
+class EvaluationOutcome(str, Enum):
+    ADDRESSED = "addressed"
+    NOT_ADDRESSED = "not_addressed"
+    UNCLEAR = "unclear"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class RetentionStatus(str, Enum):
+    HELD = "held"
+    DELETED = "deleted"
+    EXPIRED = "expired"
 
 
 class StrictModel(BaseModel):
@@ -192,6 +225,193 @@ class StoryBrief(StrictModel):
         return values
 
 
+class StoryBeatInput(StrictModel):
+    """Creator-entered beat data; the server assigns the beat ID."""
+
+    title: str = Field(min_length=1, max_length=120)
+    story_job: str = Field(min_length=1, max_length=500)
+    required_visual_proof: str = Field(min_length=1, max_length=500)
+
+
+class StoryContextInput(StrictModel):
+    """Primary live workflow input; IDs and versions are server-owned."""
+
+    title: str = Field(min_length=1, max_length=160)
+    logline: str = Field(min_length=1, max_length=500)
+    emotional_arc: str = Field(min_length=1, max_length=300)
+    visual_style: str = Field(min_length=1, max_length=500)
+    must_show: list[str] = Field(default_factory=list, max_length=12)
+    constraints: list[str] = Field(default_factory=list, max_length=12)
+    beats: list[StoryBeatInput] = Field(min_length=1, max_length=12)
+    active_beat_index: int = Field(ge=0)
+    shot_intent: CinematicIntent
+
+    @field_validator("must_show", "constraints")
+    @classmethod
+    def validate_context_lists(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if not value or len(value) > 240:
+                raise ValueError("context list items must be between 1 and 240 characters")
+        return values
+
+    @model_validator(mode="after")
+    def validate_active_beat(self) -> "StoryContextInput":
+        if self.active_beat_index >= len(self.beats):
+            raise ValueError("active_beat_index must reference an entered beat")
+        return self
+
+
+class ConsentRequest(StrictModel):
+    granted: bool
+
+
+class CaptureRequest(StrictModel):
+    notes: str = Field(default="", max_length=500)
+
+
+class EvaluationRequest(StrictModel):
+    pass
+
+
+class TakeEvaluationInput(StrictModel):
+    """Untrusted model output for a follow-up coverage evaluation."""
+
+    outcome: EvaluationOutcome
+    explanation: str = Field(min_length=1, max_length=600)
+
+
+class ConsentState(StrictModel):
+    granted: bool = False
+    granted_at: str | None = None
+    revoked_at: str | None = None
+    scope: Literal["session"] = "session"
+
+
+class ObservationFrame(StrictModel):
+    frame_index: int = Field(ge=0, le=32)
+    captured_at: str = Field(min_length=1, max_length=80)
+    frame_age_ms: int = Field(ge=0, le=120000)
+    width: int = Field(ge=16, le=8192)
+    height: int = Field(ge=16, le=8192)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ObservationBurst(StrictModel):
+    observation_id: str = Field(min_length=1, max_length=100)
+    job_id: str = Field(min_length=1, max_length=100)
+    story_version: int = Field(ge=1)
+    intent_version: int = Field(ge=1)
+    beat_id: str = Field(min_length=1, max_length=80)
+    provenance: str = Field(min_length=1, max_length=40)
+    requested_source: str = Field(min_length=1, max_length=40)
+    active_source: str = Field(min_length=1, max_length=40)
+    freshness_limit_ms: int = Field(ge=1, le=120000)
+    capture_started_at: str = Field(min_length=1, max_length=80)
+    capture_completed_at: str = Field(min_length=1, max_length=80)
+    frames: list[ObservationFrame] = Field(min_length=3, max_length=8)
+    retention_status: RetentionStatus = RetentionStatus.HELD
+
+
+class TakeRecommendationInput(StrictModel):
+    """Strict model/provider output without server-owned fields."""
+
+    beat_id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=160)
+    diagnosis: str = Field(min_length=1, max_length=500)
+    story_purpose: str = Field(min_length=1, max_length=500)
+    visual_objective: str = Field(min_length=1, max_length=500)
+    why_now: str = Field(min_length=1, max_length=500)
+    execution_guidance: str = Field(min_length=1, max_length=600)
+    technical_plausibility: str = Field(min_length=1, max_length=500)
+    safety_notes: str = Field(min_length=1, max_length=600)
+    priority: Priority = Priority.INFO
+    confidence: confloat(ge=0.0, le=1.0) | None = None
+
+
+class TakeRecommendation(StrictModel):
+    recommendation_id: str = Field(min_length=1, max_length=100)
+    analysis_job_id: str = Field(min_length=1, max_length=100)
+    observation_id: str = Field(min_length=1, max_length=100)
+    beat_id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=160)
+    diagnosis: str = Field(min_length=1, max_length=500)
+    story_purpose: str = Field(min_length=1, max_length=500)
+    visual_objective: str = Field(min_length=1, max_length=500)
+    why_now: str = Field(min_length=1, max_length=500)
+    execution_guidance: str = Field(min_length=1, max_length=600)
+    technical_plausibility: str = Field(min_length=1, max_length=500)
+    safety_notes: str = Field(min_length=1, max_length=600)
+    priority: Priority = Priority.INFO
+    confidence: confloat(ge=0.0, le=1.0) | None = None
+    role: RecommendationRole
+    rank: int = Field(ge=1, le=3)
+    status: Literal["recommended", "selected", "acted", "dismissed"] = "recommended"
+    created_at: str = Field(min_length=1, max_length=80)
+    provenance: str = Field(min_length=1, max_length=40)
+
+
+class TakeAnalysisResult(StrictModel):
+    observed: list[str] = Field(min_length=1, max_length=8)
+    not_established: list[str] = Field(min_length=1, max_length=8)
+    missing_coverage: list[str] = Field(min_length=1, max_length=8)
+    recommendations: list[TakeRecommendationInput] = Field(min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def reject_generic_recommendations(self) -> "TakeAnalysisResult":
+        banned = {"make it more cinematic", "make it cinematic", "improve the shot"}
+        prohibited = {"waypoint", "autonomous", "take off", "land now", "return home", "fly to"}
+        for recommendation in self.recommendations:
+            text = " ".join(
+                [
+                    recommendation.title,
+                    recommendation.diagnosis,
+                    recommendation.visual_objective,
+                    recommendation.execution_guidance,
+                ]
+            ).casefold()
+            if any(phrase in text for phrase in banned):
+                raise ValueError("recommendation is too generic to be actionable")
+            if any(phrase in text for phrase in prohibited):
+                raise ValueError("recommendation contains flight-control language")
+        return self
+
+
+class AnalysisJob(StrictModel):
+    job_id: str = Field(min_length=1, max_length=100)
+    kind: AnalysisJobKind
+    status: AnalysisJobStatus = AnalysisJobStatus.REQUESTED
+    requested_at: str = Field(min_length=1, max_length=80)
+    started_at: str | None = None
+    completed_at: str | None = None
+    story_version: int = Field(ge=1)
+    intent_version: int = Field(ge=1)
+    beat_id: str = Field(min_length=1, max_length=80)
+    observation_id: str | None = None
+    result: TakeAnalysisResult | None = None
+    evaluation: EvaluationOutcome | None = None
+    error: str | None = Field(default=None, max_length=500)
+
+
+class CaptureRecord(StrictModel):
+    capture_id: str = Field(min_length=1, max_length=100)
+    recommendation_id: str = Field(min_length=1, max_length=100)
+    captured_at: str = Field(min_length=1, max_length=80)
+    notes: str = Field(default="", max_length=500)
+    provenance: str = Field(min_length=1, max_length=40)
+
+
+class EvaluationRecord(StrictModel):
+    evaluation_id: str = Field(min_length=1, max_length=100)
+    job_id: str = Field(min_length=1, max_length=100)
+    capture_id: str = Field(min_length=1, max_length=100)
+    recommendation_id: str = Field(min_length=1, max_length=100)
+    observation_id: str = Field(min_length=1, max_length=100)
+    outcome: EvaluationOutcome
+    explanation: str = Field(min_length=1, max_length=600)
+    created_at: str = Field(min_length=1, max_length=80)
+    provenance: str = Field(min_length=1, max_length=40)
+
+
 class ShotCoverage(StrictModel):
     coverage_id: str = Field(min_length=1, max_length=80)
     beat_id: str = Field(min_length=1, max_length=80)
@@ -237,6 +457,7 @@ class TweakDecisionRequest(StrictModel):
 
 class RecommendationDecisionRequest(StrictModel):
     decision: RecommendationDecision
+    reason: str = Field(default="", max_length=300)
 
 
 class VisualizationRequestInput(StrictModel):

@@ -2,7 +2,21 @@
 
 **An Advisory AI Cinematic Decision Engine**
 
-CinePilot connects live, prerecorded, or synthetic footage to the Google Gemini Live API and turns it into an advisory cinematic decision engine. Gemini watches footage in real time, compares it with a creator-provided story or shot intent, returns one to three structured cinematic tweaks, and can recommend what shot should be captured next to advance the story. The creator remains in control of approval and flight.
+CinePilot connects a live RTMP/RTSP feed to an advisory cinematic coverage
+decision engine. Between takes, a creator-entered story brief and a fresh,
+bounded evidence burst are sent in one multimodal Gemini request to return one
+ranked next shot and two alternatives. The creator remains in control of
+approval, capture, and flight. Synthetic and prerecorded inputs remain
+explicitly labeled test/demo sources.
+
+## Product documents
+
+If you are evaluating CinePilot as a creator, director, or production partner,
+start with the plain-language product documents:
+
+- [Product brief](docs/product-brief.md) — who CinePilot is for, the problem it solves, and its boundaries.
+- [Creator workflow](docs/creator-workflow.md) — how the live-feed, between-takes workflow works.
+- [Product evidence and claims](docs/product-evidence.md) — what is verified, unverified, and still requires creator evaluation.
 
 ## Cinematic Tweak Engine
 
@@ -16,17 +30,17 @@ Set shot intent -> watch the shot -> diagnose the highest-impact problem
 
 The critique is the canonical product output. A critique contains a summary and up to three tweaks, each with a category, diagnosis, recommendation, rationale, priority, and optional spoken cue. The system is advisory: it does not control the drone or edit footage automatically.
 
-The next demo extends this into a story-aware coverage loop:
+The primary live coverage loop is:
 
 ```text
-load mock story -> watch current shot -> identify current beat and missing coverage
--> recommend two or three next shots -> creator selects one -> capture manually
--> mark coverage complete -> evaluate the next result
+enter story context -> consent -> wait for a fresh live frame -> analyze current take
+-> identify observed and missing coverage -> select one next shot
+-> pilot captures manually -> mark take captured -> evaluate a new fresh burst
 ```
 
-The seeded story and exact walkthrough are in `docs/demo-script.md`. The
-story-aware contracts and deterministic mock loop are implemented locally; live
-Gemini story reasoning remains separately labeled and requires a configured key.
+The seeded story is only for explicit deterministic demo mode. The primary
+live path requires creator entry through the Live Coverage Desk and explicit
+cloud consent. The exact walkthrough is in `docs/demo-script.md`.
 
 The current implementation is intentionally local and session-scoped. It writes critique and creator-action events to an append-only JSONL log for demo evidence and can optionally publish tool calls and telemetry to Grafana Loki.
 
@@ -40,10 +54,9 @@ flowchart LR
         C[Synthetic Fallback] -.auto-swap.-> V
     end
 
-    V -- "JPEG frames @ ~1.2 FPS" --> G[Gemini Live API<br/>bidirectional WebSocket]
-    G -- "tool calls" --> T[update_shot_list<br/>speak_director_guidance]
-    T --> S[AppState]
-    T --> L[Grafana Loki<br/>telemetry]
+    V -- "fresh frozen burst on explicit request" --> G[One bounded Gemini multimodal request]
+    G --> S[Validated AppState]
+    S --> L[Event log / optional telemetry]
 
     V -- MJPEG --> W[Director's Monitor<br/>FastAPI + SSE]
     S -- "SSE every 250ms" --> W
@@ -51,7 +64,7 @@ flowchart LR
 ```
 
 1. **`VideoStreamManager`** grabs frames from RTMP, RTSP, a webcam, a local video file, or a synthetic OpenCV-generated aerial scene. Real sources run through an explicit status machine (`connecting → live → stale → disconnected → reconnecting`) with exponential-backoff reconnects, stale-frame detection, and redacted stream URLs. A failed real source **never** silently becomes synthetic footage — synthetic fallback requires explicit opt-in (`--allow-synthetic-fallback` or `--demo-mode`).
-2. **`DirectorAgent`** streams JPEG frames to Gemini Live at ~1.2 FPS over a bidirectional WebSocket and listens for responses. Only fresh frames are forwarded; stale or disconnected frames are withheld and counted instead of being presented as current observations.
+2. **Explicit analysis jobs** capture three to eight fresh frames only after the creator presses **Analyze current take**. Raw bytes are transient and deleted after processing; the observation metadata and provenance remain auditable. The legacy `DirectorAgent` path is disabled by default.
 3. Gemini calls three tools as it directs the shoot:
    - **`publish_cinematic_critique`** — publishes one to three validated cinematic tweaks against the current intent.
    - **`update_shot_list`** — moves the 5-part shot list (Establishing Wide, Top-Down Property, Orbit Pass, Low Reveal, Pull Away) through `PENDING → IN_PROGRESS → COMPLETED / REJECTED` with directorial feedback.
@@ -68,7 +81,7 @@ flowchart LR
 
 The story-aware dashboard now answers: what beat are we in, what did the current shot prove, what is missing, and which next shot can advance the story. Deterministic fixture behavior is labeled separately from live Gemini behavior.
 
-The story-first dashboard also includes an advisory Visualize panel. With a
+The story-first dashboard also includes an advisory Visual Reference tab. With a
 synthetic, prerecorded, webcam, RTSP, or RTMP source, the creator can freeze the
 latest real-place frame, request exactly three fixed 10-second concept
 animations, select one, and receive a manual capture brief. The response shows
@@ -163,7 +176,9 @@ All settings are read from `.env` (or environment variables) via pydantic-settin
 | Variable | Default | Description |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | *(empty)* | Google Gemini API key. Without it, the monitor UI still runs but no AI direction occurs. |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini Live model to connect to. |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Bounded Gemini model. |
+| `ENABLE_CONTINUOUS_LIVE` | `false` | Explicit opt-in for legacy continuous Gemini Live. |
+| `ANALYSIS_TIMEOUT_SEC` | `30.0` | Maximum time allowed for one bounded analysis request. |
 | `RTMP_URL` | `rtmp://127.0.0.1:1935/live/drone` | Default RTMP ingest URL. |
 | `RTSP_URL` | *(empty)* | Default RTSP ingest URL for `--source rtsp`. |
 | `SOURCE_CONNECT_TIMEOUT_SEC` | `10.0` | Seconds to wait for a real source to open. |
@@ -177,7 +192,7 @@ All settings are read from `.env` (or environment variables) via pydantic-settin
 | `GRAFANA_URL` | *(empty)* | Grafana Loki push endpoint (`.../loki/api/v1/push`). |
 | `GRAFANA_USER` | *(empty)* | Grafana Cloud Loki username / tenant ID. |
 | `GRAFANA_API_KEY` | *(empty)* | Grafana Cloud API token. |
-| `FRAME_INTERVAL_SEC` | `0.8` | Seconds between frames sent to Gemini (~1.2 FPS). |
+| `FRAME_INTERVAL_SEC` | `0.8` | Legacy Live sampling interval. |
 | `HOST` | `127.0.0.1` | Web UI bind host. |
 | `PORT` | `8000` | Web UI port (overridable with `--port`). |
 
@@ -192,6 +207,13 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 | `GET /events` | Server-Sent Events stream of the full app state (shot list, guidance, metrics), pushed on change or every 250 ms. |
 | `GET /api/state` | Current validated intent, critique, history, actions, shots, and metrics. |
 | `POST /api/intent` | Set the creator's current shot intent. |
+| `POST /api/story` | Save creator-entered story context; the server assigns IDs and versions. |
+| `POST /api/consent` | Grant or revoke session-scoped cloud-analysis consent. |
+| `POST /api/analysis` | Request one bounded fresh evidence-burst analysis. |
+| `GET /api/analysis/{job_id}` | Read analysis progress or terminal state. |
+| `POST /api/take-recommendations/{id}/decision` | Select or dismiss a primary/alternative recommendation. |
+| `POST /api/take-recommendations/{id}/capture` | Creator marks the selected manual take captured. |
+| `POST /api/captures/{id}/evaluate` | Request a fresh follow-up evidence evaluation. |
 | `POST /api/critiques/{critique_id}/tweaks/{tweak_id}/decision` | Mark a tweak accepted, acted, or dismissed (creator-only). |
 | `POST /api/shots/{shot_id}` | Creator-only shot lifecycle update — the only path that can mark a shot `COMPLETED`. |
 | `GET /api/story` | Return the story, ordered beats, active beat, versions, and provenance. |

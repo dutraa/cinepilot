@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # --- Gemini ---
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # The primary product loop is explicit between-takes analysis. The legacy
+    # continuous Gemini Live path remains available only as an opt-in.
+    ENABLE_CONTINUOUS_LIVE: bool = False
+    ANALYSIS_TIMEOUT_SEC: float = 30.0
 
     # --- Video ingest ---
     RTMP_URL: str = "rtmp://127.0.0.1:1935/live/drone"

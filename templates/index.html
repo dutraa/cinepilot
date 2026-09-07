@@ -3,285 +3,132 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CinePilot — Story Decision Monitor</title>
+<title>CinePilot — Live Coverage Desk</title>
 <style>
-  :root { --bg:#0b0d12; --panel:#12161f; --edge:#252d3d; --text:#e8ecf4; --dim:#919bae; --accent:#61c8f7; --green:#53d88a; --yellow:#f3c969; --red:#f07878; --purple:#ad9af7; }
+  :root { --bg:#0b0d12; --panel:#12161f; --edge:#252d3d; --text:#e8ecf4; --dim:#919bae; --accent:#61c8f7; --green:#53d88a; --yellow:#f3c969; --red:#f07878; }
   * { box-sizing:border-box; margin:0; padding:0; }
   body { background:radial-gradient(1000px 600px at 10% -10%,#172033 0%,var(--bg) 58%); color:var(--text); font-family:"Segoe UI",Inter,system-ui,sans-serif; min-height:100vh; padding:20px; }
-  header { display:flex; align-items:center; gap:18px; border-bottom:1px solid var(--edge); padding:0 0 18px; flex-wrap:wrap; }
+  header { display:flex; align-items:center; gap:18px; border-bottom:1px solid var(--edge); padding-bottom:18px; flex-wrap:wrap; }
   .logo { font-size:1.45rem; font-weight:750; letter-spacing:2px; } .logo span { color:var(--accent); }
-  .tagline,.eyebrow,.muted { color:var(--dim); } .tagline { font-size:.76rem; letter-spacing:1.1px; text-transform:uppercase; margin-top:3px; }
+  .tagline,.muted,.eyebrow { color:var(--dim); } .tagline { font-size:.76rem; letter-spacing:1.1px; text-transform:uppercase; margin-top:3px; }
   .header-right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .pill { border:1px solid var(--edge); border-radius:999px; padding:6px 11px; color:var(--dim); font-size:.72rem; font-weight:700; letter-spacing:.4px; }
   .pill.on { color:var(--green); border-color:#356d50; } .pill.warn { color:var(--yellow); border-color:#705e32; } .pill.off { color:var(--red); border-color:#743b42; }
-  button { min-height:44px; border:0; border-radius:7px; background:var(--accent); color:#071018; cursor:pointer; font:inherit; font-size:.75rem; font-weight:750; padding:8px 11px; }
+  button { min-height:44px; border:0; border-radius:7px; background:var(--accent); color:#071018; cursor:pointer; font:inherit; font-size:.76rem; font-weight:750; padding:8px 12px; }
   button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-  button.secondary { background:transparent; color:var(--dim); border:1px solid var(--edge); } button:disabled { cursor:wait; opacity:.55; }
-  #muteBtn { background:var(--panel); color:var(--text); border:1px solid var(--edge); }
-  .layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(340px,1fr); gap:18px; margin-top:18px; }
-  .stack { display:grid; gap:18px; align-content:start; } .panel { background:rgba(18,22,31,.96); border:1px solid var(--edge); border-radius:12px; overflow:hidden; }
+  button.secondary { background:transparent; color:var(--dim); border:1px solid var(--edge); } button:disabled { cursor:not-allowed; opacity:.5; }
+  .layout { display:grid; gap:18px; margin-top:18px; max-width:1440px; margin-left:auto; margin-right:auto; }
+  .tab-list { display:flex; gap:8px; max-width:1440px; margin:18px auto 0; border-bottom:1px solid var(--edge); }
+  .tab { background:transparent; color:var(--dim); border:1px solid transparent; border-bottom:0; border-radius:8px 8px 0 0; }
+  .tab[aria-selected="true"] { color:var(--text); background:var(--panel); border-color:var(--edge); }
+  .tab-panel { display:grid; gap:18px; }
+  .visualization-intro { display:flex; justify-content:space-between; align-items:start; gap:18px; }
+  .visualization-intro p { color:var(--dim); max-width:78ch; margin-top:6px; }
+  .visualization-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .visualization-card { border:1px solid var(--edge); border-radius:9px; overflow:hidden; background:#ffffff04; }
+  .visualization-frame { background:#000; aspect-ratio:16/9; overflow:hidden; }
+  .visualization-frame img { display:block; width:100%; height:100%; object-fit:cover; animation:reference-drift 10s ease-in-out infinite alternate; }
+  .visualization-card:nth-child(2) img { animation-name:reference-parallax; }
+  .visualization-card:nth-child(3) img { animation-name:reference-pull-away; }
+  .visualization-copy { padding:13px; }
+  @keyframes reference-drift { from { transform:scale(1); } to { transform:scale(1.18) translateY(4%); } }
+  @keyframes reference-parallax { from { transform:scale(1.08) translateX(-4%); } to { transform:scale(1.08) translateX(8%); } }
+  @keyframes reference-pull-away { from { transform:scale(1.16); } to { transform:scale(1) translateY(-2%); } }
+  .panel { background:rgba(18,22,31,.97); border:1px solid var(--edge); border-radius:12px; overflow:hidden; }
   .panel-title { padding:12px 15px; border-bottom:1px solid var(--edge); color:var(--dim); font-size:.7rem; font-weight:800; letter-spacing:1.4px; text-transform:uppercase; }
-  .monitor { background:#000; position:relative; } .monitor img { display:block; width:100%; aspect-ratio:16/9; object-fit:contain; }
-  .hud { position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg,transparent 33.2%,#fff2 33.3%,transparent 33.4%,transparent 66.5%,#fff2 66.6%,transparent 66.7%),linear-gradient(0deg,transparent 33.2%,#fff2 33.3%,transparent 33.4%,transparent 66.5%,#fff2 66.6%,transparent 66.7%); }
-  .telemetry { position:absolute; left:12px; bottom:10px; padding:5px 9px; border-radius:5px; background:#0009; color:var(--accent); font: .7rem "Cascadia Code",Consolas,monospace; }
-  .story { padding:16px; } .story h1 { font-size:1.35rem; line-height:1.2; } .story-logline { margin-top:7px; color:var(--dim); font-size:.86rem; line-height:1.45; max-width:72ch; }
-  .meta-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; } .meta { border:1px solid var(--edge); border-radius:6px; color:var(--dim); font-size:.7rem; padding:5px 8px; }
-  .eyebrow { font-size:.67rem; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; } .active-beat { margin-top:17px; border-left:3px solid var(--accent); padding-left:11px; }
-  .active-beat h2 { font-size:1rem; margin-top:4px; } .active-beat p { color:var(--dim); font-size:.8rem; line-height:1.4; margin-top:5px; }
-  .beat-rail { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; margin-top:17px; } .beat { min-height:76px; padding:9px; border:1px solid var(--edge); border-radius:8px; background:#ffffff04; }
-  .beat.active { border-color:var(--accent); background:#61c8f70d; } .beat.covered { border-color:#356d50; background:#53d88a0d; } .beat.skipped { opacity:.5; }
-  .beat-number { color:var(--dim); font-size:.65rem; } .beat-title { font-size:.75rem; font-weight:750; margin-top:5px; } .beat-status { color:var(--dim); font-size:.62rem; margin-top:8px; text-transform:uppercase; }
-  .two-col { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:14px; } .subpanel { border:1px solid var(--edge); border-radius:9px; padding:12px; min-width:0; }
-  .subpanel h3 { font-size:.76rem; } .subpanel p { color:var(--dim); font-size:.78rem; line-height:1.45; margin-top:8px; } .list { list-style:none; display:grid; gap:7px; margin-top:9px; }
-  .list li { color:var(--dim); font-size:.76rem; line-height:1.35; padding-left:11px; position:relative; } .list li::before { content:""; width:5px; height:5px; border-radius:50%; background:var(--purple); position:absolute; left:0; top:.45em; }
-  .recommendations { padding:14px; display:grid; gap:10px; } .recommendation { border:1px solid var(--edge); border-radius:9px; padding:12px; background:#ffffff04; } .recommendation.selected { border-color:var(--yellow); } .recommendation.completed { border-color:#356d50; }
-  .rec-head { display:flex; justify-content:space-between; align-items:start; gap:10px; } .rec-title { font-size:.95rem; font-weight:750; } .status { color:var(--dim); font-size:.64rem; letter-spacing:.9px; text-transform:uppercase; white-space:nowrap; }
-  .rec-section { margin-top:9px; } .rec-label { color:var(--dim); font-size:.64rem; font-weight:800; letter-spacing:.8px; text-transform:uppercase; } .rec-text { font-size:.79rem; line-height:1.42; margin-top:3px; }
-  .rec-actions { display:flex; gap:6px; margin-top:11px; flex-wrap:wrap; } .rec-actions button { font-size:.68rem; padding:6px 9px; }
-  .visualize-action { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px; } .visualize-action p { color:var(--dim); font-size:.78rem; line-height:1.4; }
-  .visualizations { padding:14px; display:grid; gap:12px; } .visualization-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-  .visualization-card { min-width:0; border:1px solid var(--edge); border-radius:9px; padding:10px; background:#ffffff04; } .visualization-card.selected { border-color:var(--yellow); } .visualization-card.dismissed { opacity:.62; }
-  .concept-stage { overflow:hidden; border-radius:7px; background:#000; aspect-ratio:16/9; } .concept-stage img { width:100%; height:100%; object-fit:cover; display:block; transform-origin:center; }
-  .concept-stage img.descending-reveal { animation:descendingReveal 10s ease-in-out 1 both; } .concept-stage img.lateral-parallax { animation:lateralParallax 10s ease-in-out 1 both; } .concept-stage img.restrained-pull-away { animation:restrainedPullAway 10s ease-in-out 1 both; }
-  @keyframes descendingReveal { from { transform:scale(1) translateY(-7%); } to { transform:scale(1.25) translateY(7%); } } @keyframes lateralParallax { from { transform:scale(1.08) translateX(-6%); } to { transform:scale(1.08) translateX(6%); } } @keyframes restrainedPullAway { from { transform:scale(1.18) translateY(3%); } to { transform:scale(1) translateY(-2%); } }
-  .visualization-copy { min-width:0; overflow-wrap:anywhere; font-size:.76rem; line-height:1.4; } .visualization-copy .rec-label { margin-top:8px; } .visualization-notice { color:var(--yellow); font-size:.73rem; line-height:1.4; } .manual-brief { border:1px solid #705e32; border-radius:9px; padding:12px; background:#f3c9690d; } .manual-brief h3 { font-size:.86rem; } .manual-brief p { color:var(--dim); font-size:.76rem; line-height:1.45; margin-top:6px; }
-  .empty,.error,.stale { color:var(--dim); font-size:.8rem; line-height:1.5; padding:14px; } .error { color:var(--red); } .stale { color:var(--yellow); }
-  .pill.alt { color:#f0a35e; border-color:#7a5a36; }
-  .source-strip { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:9px 14px; border-top:1px solid var(--edge); color:var(--dim); font:.72rem "Cascadia Code",Consolas,monospace; }
-  .source-strip b { color:var(--text); font-weight:600; }
-  .real-badge { font-weight:800; letter-spacing:1px; padding:3px 9px; border-radius:999px; font-size:.64rem; }
-  .real-badge.real { color:var(--green); border:1px solid #356d50; background:#53d88a14; }
-  .real-badge.synthetic { color:var(--yellow); border:1px solid #705e32; background:#f3c96914; }
-  .monitor-overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column; gap:8px; background:#0a0808d1; text-align:center; padding:20px; }
-  .monitor-overlay.visible { display:flex; }
-  .monitor-overlay .overlay-title { font-size:1.25rem; font-weight:800; letter-spacing:1.4px; color:var(--red); }
-  .monitor-overlay.stale .overlay-title, .monitor-overlay.connecting .overlay-title, .monitor-overlay.reconnecting .overlay-title, .monitor-overlay.fallback .overlay-title { color:var(--yellow); }
-  .monitor-overlay .overlay-reason { color:var(--dim); font-size:.8rem; max-width:80%; }
-  .source-reason { padding:6px 14px 0; color:var(--dim); font-size:.72rem; line-height:1.4; }
-  .advisory-note { padding:8px 14px 12px; color:var(--dim); font-size:.7rem; line-height:1.4; }
-  .critique-warning { display:none; margin:10px 14px 0; padding:9px 11px; border:1px solid #705e32; border-radius:8px; background:#f3c9690d; color:var(--yellow); font-size:.75rem; line-height:1.4; }
-  .critique-warning.visible { display:block; }
-  .tweak-safety { color:var(--yellow); font-size:.72rem; line-height:1.4; margin-top:5px; }
-  .shot-complete-btn { margin-top:8px; min-height:34px; background:transparent; color:var(--green); border:1px solid #356d50; font-size:.68rem; padding:5px 9px; }
-  .intent-form { padding:14px; display:grid; gap:8px; } label { color:var(--dim); font-size:.66rem; font-weight:800; letter-spacing:.9px; text-transform:uppercase; } input,textarea { width:100%; border:1px solid var(--edge); border-radius:7px; background:#0d1119; color:var(--text); font:inherit; font-size:.8rem; padding:8px 9px; } textarea { resize:vertical; }
-  .intent-status { min-height:1em; color:var(--dim); font-size:.72rem; } .critique { padding:14px; } .critique-summary { font-size:.86rem; line-height:1.45; } .tweak-card { border-top:1px solid var(--edge); margin-top:10px; padding-top:10px; } .tweak-meta { color:var(--dim); font-size:.65rem; text-transform:uppercase; } .tweak-copy { font-size:.78rem; line-height:1.4; margin-top:6px; } .tweak-rationale { color:var(--dim); font-size:.75rem; margin-top:5px; }
-  .shot-list { display:grid; gap:8px; padding:12px; } .shot { border:1px solid var(--edge); border-radius:8px; padding:9px; } .shot-head { display:flex; justify-content:space-between; gap:8px; font-size:.77rem; font-weight:700; } .shot-feedback { color:var(--dim); font-size:.72rem; line-height:1.4; margin-top:5px; }
-  @media (prefers-reduced-motion:reduce) { .concept-stage img { animation:none !important; transform:none !important; } }
-  @media (max-width:980px) { .layout { grid-template-columns:1fr; } } @media (max-width:620px) { body { padding:12px; } .two-col { grid-template-columns:1fr; } .beat-rail { grid-template-columns:1fr 1fr; } .header-right { margin-left:0; } }
+  .panel-body { padding:16px; } .grid-two { display:grid; grid-template-columns:1fr 1fr; gap:14px; } .grid-three { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .eyebrow { font-size:.67rem; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; } h1 { font-size:1.4rem; line-height:1.2; } h2 { font-size:1rem; } h3 { font-size:.83rem; }
+  p, .copy { font-size:.8rem; line-height:1.48; } .muted, .support { font-size:.76rem; line-height:1.45; }
+  .story-summary { display:flex; justify-content:space-between; gap:18px; align-items:start; } .story-logline { color:var(--dim); margin-top:7px; max-width:75ch; }
+  .active-beat { margin-top:15px; border-left:3px solid var(--accent); padding-left:11px; } .active-beat p { color:var(--dim); margin-top:5px; }
+  .beat-rail { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; margin-top:16px; } .beat { min-height:68px; padding:9px; border:1px solid var(--edge); border-radius:8px; background:#ffffff04; } .beat.active { border-color:var(--accent); background:#61c8f70d; } .beat.covered { border-color:#356d50; } .beat.skipped { opacity:.5; }
+  .beat-title { font-size:.75rem; font-weight:750; margin-top:5px; } .beat-status { color:var(--dim); font-size:.62rem; margin-top:7px; text-transform:uppercase; }
+  .monitor { background:#000; position:relative; } .monitor img { display:block; width:100%; aspect-ratio:16/9; object-fit:contain; } .hud { position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg,transparent 33.2%,#fff2 33.3%,transparent 33.4%,transparent 66.5%,#fff2 66.6%,transparent 66.7%),linear-gradient(0deg,transparent 33.2%,#fff2 33.3%,transparent 33.4%,transparent 66.5%,#fff2 66.6%,transparent 66.7%); }
+  .monitor-overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column; gap:8px; background:#0a0808d1; text-align:center; padding:20px; } .monitor-overlay.visible { display:flex; } .overlay-title { color:var(--red); font-size:1.25rem; font-weight:800; letter-spacing:1.4px; } .overlay-reason { color:var(--dim); font-size:.8rem; max-width:80%; }
+  .source-strip { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:9px 14px; border-top:1px solid var(--edge); color:var(--dim); font:.72rem "Cascadia Code",Consolas,monospace; } .source-strip b { color:var(--text); font-weight:600; }
+  .real-badge { font-weight:800; letter-spacing:1px; padding:3px 9px; border-radius:999px; font-size:.64rem; } .real-badge.real { color:var(--green); border:1px solid #356d50; } .real-badge.synthetic { color:var(--yellow); border:1px solid #705e32; } .real-badge.off { color:var(--red); border:1px solid #743b42; }
+  .action-bar { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:14px 16px; border-top:1px solid var(--edge); } .action-copy { color:var(--dim); max-width:68ch; } .primary-action { min-width:220px; font-size:.9rem; }
+  .status-box { min-height:45px; margin-top:12px; padding:10px 12px; border-radius:8px; background:#ffffff04; color:var(--dim); font-size:.78rem; line-height:1.4; } .status-box.error { color:var(--red); border:1px solid #743b42; } .status-box.warn { color:var(--yellow); border:1px solid #705e32; }
+  .list { list-style:none; display:grid; gap:8px; } .list li { color:var(--dim); font-size:.78rem; line-height:1.4; padding-left:12px; position:relative; } .list li::before { content:""; width:5px; height:5px; border-radius:50%; background:var(--accent); position:absolute; left:0; top:.5em; }
+  .card { border:1px solid var(--edge); border-radius:9px; padding:13px; background:#ffffff04; } .card.primary { border-color:var(--accent); } .card.selected { border-color:var(--yellow); } .card.acted { border-color:var(--green); }
+  .card-head { display:flex; justify-content:space-between; align-items:start; gap:10px; } .card-title { font-size:.95rem; font-weight:750; } .status { color:var(--dim); font-size:.64rem; letter-spacing:.9px; text-transform:uppercase; white-space:nowrap; }
+  .field { margin-top:10px; } .field-label { color:var(--dim); font-size:.64rem; font-weight:800; letter-spacing:.8px; text-transform:uppercase; } .field-value { margin-top:3px; font-size:.79rem; line-height:1.42; }
+  .actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:12px; } .actions button { min-height:36px; font-size:.7rem; padding:6px 10px; }
+  form { display:grid; gap:9px; } label { color:var(--dim); font-size:.66rem; font-weight:800; letter-spacing:.9px; text-transform:uppercase; } input,textarea { width:100%; border:1px solid var(--edge); border-radius:7px; background:#0d1119; color:var(--text); font:inherit; font-size:.8rem; padding:8px 9px; } textarea { resize:vertical; }
+  .form-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } .consent { display:flex; align-items:center; gap:8px; color:var(--dim); font-size:.76rem; } .consent input { width:auto; }
+  .brief { border:1px solid #705e32; border-radius:9px; padding:14px; background:#f3c9690d; } .brief h3 { font-size:.9rem; } .brief .support { margin-top:5px; } .history-row { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid var(--edge); padding:9px 0; font-size:.75rem; } .history-row:last-child { border-bottom:0; }
+  details { color:var(--dim); } summary { cursor:pointer; padding:14px 16px; font-size:.7rem; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; } .system-grid { padding:0 16px 16px; display:grid; grid-template-columns:repeat(4,1fr); gap:8px; } .system-item { border:1px solid var(--edge); border-radius:7px; padding:9px; font-size:.72rem; } .system-item b { display:block; color:var(--text); margin-top:3px; }
+  .empty { color:var(--dim); font-size:.8rem; line-height:1.5; } .advisory { color:var(--dim); font-size:.72rem; line-height:1.4; padding:10px 16px 14px; }
+  @media (max-width:900px) { .grid-two,.grid-three,.visualization-grid { grid-template-columns:1fr; } .story-summary { display:block; } .action-bar { align-items:stretch; flex-direction:column; } .primary-action { width:100%; } .system-grid { grid-template-columns:1fr 1fr; } .visualization-intro { display:block; } }
+  @media (max-width:620px) { body { padding:12px; } .beat-rail { grid-template-columns:1fr 1fr; } .header-right { margin-left:0; } .system-grid { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
 <header>
-  <div><div class="logo">CINE<span>PILOT</span></div><div class="tagline">Story Decision Monitor · Advisory only</div></div>
-  <div class="header-right">
-    <div id="provenancePill" class="pill">Mode: loading</div><div id="sourcePill" class="pill">Source: checking</div><div id="geminiPill" class="pill warn">Gemini: checking</div><div id="grafanaPill" class="pill warn">Grafana: checking</div><div id="connectionStatus" class="pill warn">State: connecting</div><button id="muteBtn" type="button">Mute Audio Guidance</button>
-  </div>
+  <div><div class="logo">CINE<span>PILOT</span></div><div class="tagline">Live Coverage Desk · between-takes advisory only</div></div>
+  <div class="header-right"><div id="sourcePill" class="pill warn">Source: checking</div><div id="provenancePill" class="pill">Provenance: checking</div><div id="consentPill" class="pill warn">Cloud consent: required</div><div id="connectionStatus" class="pill warn">State: connecting</div></div>
 </header>
-
+<nav class="tab-list" role="tablist" aria-label="CinePilot workspaces">
+  <button id="coverageDeskTab" class="tab" type="button" role="tab" aria-selected="true" aria-controls="coverageDeskPanel">Coverage Desk</button>
+  <button id="visualReferenceTab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="visualReferencePanel" tabindex="-1">Visual Reference</button>
+</nav>
 <main class="layout">
-  <section class="stack">
-    <div class="panel">
-      <div class="panel-title">Current shot · live or synthetic</div>
-      <div class="monitor">
-        <img src="/video_feed" alt="Current aerial shot feed" />
-        <div class="hud"></div>
-        <div class="telemetry">FPS <b id="fpsVal">0.0</b> · LATENCY <b id="latencyVal">0</b> ms · FRAMES <b id="framesVal">0</b></div>
-        <div id="monitorOverlay" class="monitor-overlay">
-          <div class="overlay-title" id="overlayTitle">SOURCE DISCONNECTED</div>
-          <div class="overlay-reason" id="overlayReason"></div>
-        </div>
-      </div>
-      <div class="source-strip">
-        <span id="realBadge" class="real-badge synthetic">CHECKING</span>
-        <span>status <b id="srcStatus">connecting</b></span>
-        <span>requested <b id="srcRequested">-</b></span>
-        <span>active <b id="srcActive">-</b></span>
-        <span>frame age <b id="srcFrameAge">-</b></span>
-        <span>capture fps <b id="srcFps">-</b></span>
-        <span>reconnects <b id="srcReconnects">0</b></span>
-        <span id="srcUrl"></span>
-      </div>
-      <div id="srcReason" class="source-reason"></div>
-      <div class="advisory-note">CinePilot is advisory only. It never controls the drone. The pilot is responsible for flight safety, obstacle clearance, and every maneuver.</div>
-    </div>
-    <div class="panel"><div class="panel-title">1 · Story and active beat</div><div class="story"><h1 id="storyTitle">Loading story...</h1><p id="storyLogline" class="story-logline">Loading the seeded story brief.</p><div class="meta-row"><span id="storyVersion" class="meta">Story v—</span><span id="modeMeta" class="meta">Mode: —</span><span id="sourceMeta" class="meta">Source: —</span></div><div id="activeBeat" class="active-beat"><div class="eyebrow">Active beat</div><h2 id="activeBeatTitle">Waiting for story state</h2><p id="activeBeatCopy">The active story beat will appear here.</p></div><div id="beatRail" class="beat-rail"></div></div></div>
-    <div class="panel"><div class="panel-title">2 · What the current shot proves</div><div class="two-col"><div id="currentShotContribution" class="subpanel"><div class="eyebrow">Observed contribution</div><p id="contributionText">Waiting for the current shot observation.</p></div><div class="subpanel"><div class="eyebrow">What it does not prove</div><p id="contributionLimitations">Waiting for coverage limits.</p></div></div></div>
-    <div id="coveragePanel" class="panel"><div class="panel-title">3 · Coverage state</div><div class="two-col"><div class="subpanel"><h3>Covered proof</h3><ul id="coveredCoverage" class="list"><li>Loading coverage...</li></ul></div><div class="subpanel"><h3>Missing coverage</h3><ul id="missingCoverage" class="list"><li>Loading missing beats...</li></ul></div></div></div>
-    <div id="visualizationPanel" class="panel"><div class="panel-title">4 · Visualize this place · illustrative reference</div><div class="visualize-action"><p id="visualizationActionCopy">Freeze the latest available place frame and request three fixed 10-second concepts for the active beat and current shot.</p><button id="visualizeBtn" type="button">Visualize this place</button></div><div id="visualizationStatus" class="visualizations" aria-live="polite" aria-atomic="true"><div class="empty">No visualization requested yet.</div></div></div>
-    <div class="panel"><div class="panel-title">5 · Possible next shots · creator chooses manually</div><div id="recommendationPanel" class="recommendations"><div class="empty">Loading recommendations...</div></div></div>
-  </section>
-
-  <aside class="stack">
-    <div class="panel"><div class="panel-title">Shot intent</div><form id="intentForm" class="intent-form"><label for="shotName">Shot name</label><input id="shotName" value="Opening aerial" maxlength="120" required /><label for="creativeGoal">Creative goal</label><textarea id="creativeGoal" rows="2" maxlength="500" required>Make the lodge feel remote, then worth approaching.</textarea><label for="subject">Subject</label><input id="subject" value="The mountain lodge" maxlength="200" required /><label for="desiredFeel">Desired feel</label><input id="desiredFeel" value="Restrained, cinematic, and welcoming" maxlength="160" /><label for="cameraMove">Camera movement</label><input id="cameraMove" value="Slow reveal with deliberate pacing" maxlength="120" /><label for="constraints">Constraints</label><input id="constraints" value="Keep guidance manual; maintain safe clearance" maxlength="160" /><button type="submit">Set Shot Intent</button><div id="intentStatus" class="intent-status"></div></form></div>
-    <div class="panel"><div class="panel-title">Current cinematic critique</div><div id="critiqueWarning" class="critique-warning">Source is not live — recommendations may not reflect the current scene. Reconnect the stream before acting on them.</div><div id="critiquePanel" class="critique"><div class="empty">The current-shot critique remains available when Gemini publishes one.</div></div></div>
-    <div class="panel"><div class="panel-title">Legacy shot list context</div><div id="shotList" class="shot-list"><div class="empty">Loading shot list...</div></div></div>
-  </aside>
+<div id="coverageDeskPanel" class="tab-panel" role="tabpanel" aria-labelledby="coverageDeskTab">
+  <section class="panel"><div class="panel-title">1 · Story context and active beat</div><div class="panel-body">
+    <div class="story-summary"><div><h1 id="storyTitle">No story loaded</h1><p id="storyLogline" class="story-logline">Enter the brief before asking for coverage advice.</p></div><div id="storyVersion" class="muted">Story v—</div></div>
+    <div id="activeBeat" class="active-beat"><div class="eyebrow">Active beat</div><h2 id="activeBeatTitle">Set a story beat</h2><p id="activeBeatCopy">The next-shot decision must be anchored to a creator-entered beat.</p></div><div id="beatRail" class="beat-rail"></div>
+    <form id="storyForm" style="margin-top:16px"><div class="grid-two"><div><label for="storyTitleInput">Scene/story goal</label><input id="storyTitleInput" maxlength="160" required placeholder="A lodge returns to life" /></div><div><label for="loglineInput">Short brief</label><input id="loglineInput" maxlength="500" required placeholder="A remote lodge reopens after a storm." /></div></div><div class="grid-two"><div><label for="arcInput">Emotional arc</label><input id="arcInput" maxlength="300" required placeholder="isolation to confidence" /></div><div><label for="styleInput">Visual style</label><input id="styleInput" maxlength="500" required placeholder="Restrained aerial cinema." /></div></div><div class="grid-two"><div><label for="mustShowInput">Must-show elements</label><textarea id="mustShowInput" rows="2" placeholder="One item per line"></textarea></div><div><label for="constraintsInput">Constraints</label><textarea id="constraintsInput" rows="2" placeholder="One item per line"></textarea></div></div><div class="grid-three"><div><label for="beatTitleInput">Active beat title</label><input id="beatTitleInput" maxlength="120" required placeholder="Isolation" /></div><div><label for="beatJobInput">Story job</label><input id="beatJobInput" maxlength="500" required placeholder="Establish distance." /></div><div><label for="beatProofInput">Required visual proof</label><input id="beatProofInput" maxlength="500" required placeholder="A high wide." /></div></div><div><label for="additionalBeatsInput">Additional beats</label><textarea id="additionalBeatsInput" rows="3" placeholder="One per line: title | story job | required visual proof"></textarea></div><div class="grid-three"><div><label for="shotNameInput">Current shot intent</label><input id="shotNameInput" maxlength="120" required placeholder="Opening wide" /></div><div><label for="creativeGoalInput">Creative goal</label><input id="creativeGoalInput" maxlength="500" required placeholder="Establish isolation." /></div><div><label for="subjectInput">Subject</label><input id="subjectInput" maxlength="200" required placeholder="The lodge" /></div></div><div class="form-actions"><button type="submit">Save story context</button><label class="consent"><input id="consentInput" type="checkbox" /> I consent to sending this bounded evidence burst to the cloud AI provider.</label><span id="storyStatus" class="muted" aria-live="polite"></span></div></form>
+  </div></section>
+  <section class="panel"><div class="panel-title">2 · Live drone feed and source truth</div><div class="monitor"><img src="/video_feed" alt="Current live drone feed" /><div class="hud"></div><div id="monitorOverlay" class="monitor-overlay"><div id="overlayTitle" class="overlay-title">NO LIVE SIGNAL</div><div id="overlayReason" class="overlay-reason"></div></div></div><div class="source-strip"><span id="realBadge" class="real-badge off">NO LIVE SIGNAL</span><span>status <b id="srcStatus">—</b></span><span>requested <b id="srcRequested">—</b></span><span>active <b id="srcActive">—</b></span><span>frame age <b id="srcFrameAge">—</b></span><span>capture FPS <b id="srcFps">—</b></span><span>reconnects <b id="srcReconnects">0</b></span></div><div id="srcReason" class="advisory"></div><div class="advisory">CinePilot never controls the drone. The pilot remains responsible for flight safety, obstacle clearance, people, weather, battery, and every maneuver.</div></section>
+  <section class="panel"><div class="panel-title">3 · Explicit between-takes analysis</div><div class="action-bar"><div class="action-copy"><div class="eyebrow">Fresh evidence only</div><p>Press once after the take. CinePilot captures a bounded burst, freezes it for this job, and does not analyze while the pilot is maneuvering.</p></div><button id="analyzeBtn" class="primary-action" type="button" disabled>Analyze current take</button></div><div id="analysisStatus" class="status-box" aria-live="polite">Story, beat, fresh source, and cloud consent are required.</div></section>
+  <section class="panel"><div class="panel-title">4 · What the current take proves</div><div class="panel-body grid-two"><div><div class="eyebrow">Observed from this burst</div><ul id="observedList" class="list"><li>No analysis burst yet.</li></ul></div><div><div class="eyebrow">Not established</div><ul id="notEstablishedList" class="list"><li>No analysis burst yet.</li></ul></div></div><div class="panel-body" style="padding-top:0"><div class="eyebrow">Missing coverage</div><ul id="missingList" class="list"><li>Enter story context and analyze a fresh take.</li></ul></div></section>
+  <section class="panel"><div class="panel-title">5 · Ranked next-shot recommendation</div><div id="recommendationPanel" class="panel-body grid-three"><div class="empty">No ranked recommendation yet.</div></div></section>
+  <section class="panel"><div class="panel-title">6 · Crew decision and manual capture brief</div><div id="decisionPanel" class="panel-body"><div class="empty">Select a recommendation to create the manual capture brief. Selection is not capture or proof of usefulness.</div></div></section>
+  <section class="panel"><div class="panel-title">7 · Mark captured, then evaluate a fresh follow-up burst</div><div id="evaluationPanel" class="panel-body"><div class="empty">After the pilot manually captures the selected take, mark it captured and request a new evidence burst for evaluation.</div></div></section>
+  <section class="panel"><div class="panel-title">8 · Coverage history</div><div id="historyPanel" class="panel-body"><div class="empty">No creator-confirmed captures or model evaluations yet.</div></div></section>
+  <details class="panel"><summary>System status and legacy monitor</summary><div id="systemPanel" class="system-grid"></div><div id="critiqueWarning" class="advisory">Legacy critique is secondary and never runs continuously in the primary live coverage path.</div><div id="currentShotContribution" class="advisory">Current-shot contribution is shown in the evidence section above.</div><div id="coveragePanel" class="advisory">Coverage history is shown above.</div><form id="intentForm" class="panel-body" hidden><label for="legacyIntent">Legacy shot intent</label><input id="legacyIntent" /><button type="submit">Set Shot Intent</button></form><div id="critiquePanel" class="panel-body" hidden><span>/api/intent · /api/critiques/ and /api/recommendations/ remain backward-compatible secondary paths.</span></div><div hidden>/api/visualizations · /api/shots/</div><div class="advisory">Detailed FPS, reconnect count, provider internals, and legacy critique are secondary diagnostics. Visual Reference is available in its own tab.</div></details>
+</div>
+<div id="visualReferencePanel" class="tab-panel" role="tabpanel" aria-labelledby="visualReferenceTab" hidden>
+  <section class="panel"><div class="panel-title">Visual Reference · secondary</div><div class="panel-body"><div class="visualization-intro"><div><div class="eyebrow">Illustrative concepts from the current live observation</div><h1>Visualize this place</h1><p>AI visualization — illustrative creative reference, not flight truth. Creates three bounded, screen-space references from the current source frame and existing shot recommendations.</p></div><button id="visualizeBtn" class="primary-action" type="button" disabled>Visualize this place</button></div><div id="visualizationStatus" class="status-box" aria-live="polite">Analyze a current take first, then request three illustrative concepts.</div></div><div id="visualizationPanel" class="panel-body visualization-grid"><div class="empty">No visual references yet.</div></div><div class="advisory"><strong>Illustrative only.</strong> AI visualization is not live evidence, flight guidance, a coverage decision, or proof that production quality improved. The pilot and creator remain responsible for every production decision.</div><span hidden>duration_seconds:10, variation_count:3 renderer_version quality_status source_frame_available</span></section>
+</div>
 </main>
-
 <script>
 (function () {
   "use strict";
-  var muted = false, lastSpokenTimestamp = null, lastEventAt = 0, sourceLive = false;
-  var SOURCE_PILL_CLASS = { live:"on", connecting:"warn", reconnecting:"warn", stale:"alt", fallback:"alt", disconnected:"off", stopped:"off" };
+  var lastEventAt = 0, analysisTask = null, visualizationTask = null;
   function byId(id) { return document.getElementById(id); }
-  function text(element, value) { element.textContent = value == null ? "" : String(value); }
-  function addText(parent, tag, className, value) { var node = document.createElement(tag); node.className = className || ""; text(node, value); parent.appendChild(node); return node; }
-  function listItem(parent, value) { addText(parent, "li", "", value); }
+  function text(node, value) { node.textContent = value == null ? "" : String(value); }
+  function add(parent, tag, cls, value) { var node = document.createElement(tag); node.className = cls || ""; text(node, value); parent.appendChild(node); return node; }
+  function line(parent, label, value) { var wrap = add(parent, "div", "field"); add(wrap, "div", "field-label", label); add(wrap, "div", "field-value", value); }
   function setPill(id, value, state) { var node = byId(id); text(node, value); node.className = "pill " + (state || ""); }
-  function speak(value, priority) { if (muted || !window.speechSynthesis || !value) return; window.speechSynthesis.cancel(); var utterance = new SpeechSynthesisUtterance(value); utterance.rate = priority === "URGENT" ? 1.15 : 1; window.speechSynthesis.speak(utterance); }
-  byId("muteBtn").addEventListener("click", function () { muted = !muted; text(this, muted ? "Unmute Audio Guidance" : "Mute Audio Guidance"); if (muted && window.speechSynthesis) window.speechSynthesis.cancel(); });
-  function renderStory(state) { var story = state.story; if (!story) { text(byId("storyTitle"), "No story loaded"); return; } text(byId("storyTitle"), story.title); text(byId("storyLogline"), story.logline); text(byId("storyVersion"), "Story v" + state.story_version); text(byId("modeMeta"), "Mode: " + state.provenance.mode); text(byId("sourceMeta"), "Source: " + state.provenance.source); var active = state.active_beat; text(byId("activeBeatTitle"), active ? active.title : "No active beat"); text(byId("activeBeatCopy"), active ? active.story_job + " Required proof: " + active.required_visual_proof : "The story is complete or awaiting a beat."); var rail = byId("beatRail"); rail.textContent = ""; (state.beats || []).forEach(function (beat, index) { var card = document.createElement("div"); card.className = "beat " + beat.status; addText(card, "div", "beat-number", "0" + (index + 1)); addText(card, "div", "beat-title", beat.title); addText(card, "div", "beat-status", beat.status); rail.appendChild(card); }); }
-  function renderCoverage(state) { var contribution = state.current_shot_contribution || {}; text(byId("contributionText"), contribution.proves || "No current shot contribution recorded."); text(byId("contributionLimitations"), contribution.limitations || "No limitations recorded."); var covered = byId("coveredCoverage"), missing = byId("missingCoverage"); covered.textContent = ""; missing.textContent = ""; (state.covered_coverage || []).forEach(function (item) { listItem(covered, item.shot_title + " — " + item.notes); }); if (!covered.firstChild) listItem(covered, "No captured proof yet."); (state.missing_coverage || []).forEach(function (beat) { listItem(missing, beat.title + " — " + beat.required_visual_proof); }); if (!missing.firstChild) listItem(missing, "All beats covered or skipped."); }
-  function visualizationSection(parent, label, value) { var section = document.createElement("div"); section.className = "visualization-copy"; addText(section, "div", "rec-label", label); addText(section, "div", "", value); parent.appendChild(section); }
-  function renderManualBrief(parent, preview) { var brief = document.createElement("div"); brief.className = "manual-brief"; addText(brief, "h3", "", "Manual capture brief · selected reference only"); addText(brief, "p", "", "Selection is not capture, coverage completion, or proof that the resulting shot improved."); visualizationSection(brief, "Story purpose", preview.story_purpose); visualizationSection(brief, "Visual objective", preview.visual_objective); visualizationSection(brief, "Why now", preview.why_now); visualizationSection(brief, "Manual guidance", preview.manual_execution_guidance); visualizationSection(brief, "Safety notes", preview.safety_notes); parent.appendChild(brief); }
-  function renderVisualizations(state) {
-    var panel = byId("visualizationStatus"), button = byId("visualizeBtn");
-    var job = state.latest_visualization_job;
-    var provenance = state.provenance || {};
-    var source = provenance.source || "unknown";
-    // A current observation requires a live (or explicit-fallback) source.
-    var hasSource = state.source
-      ? sourceLive
-      : (source !== "unknown" && source !== "none");
-    panel.textContent = "";
-    if (!hasSource) {
-      addText(panel, "div", "visualization-notice", "Source disconnected: a current frame is not available.");
-    }
-    if (!job) {
-      addText(panel, "div", "empty", "No visualization requested yet. Request concepts during a safe hover or after a short evidence burst.");
-      button.disabled = !hasSource;
-      return;
-    }
-    if (job.status === "requested" || job.status === "rendering") {
-      addText(panel, "div", "stale", "Rendering exactly three 10-second concepts over the frozen observation…");
-      addText(panel, "div", "visualization-notice", "The source frame is frozen for this job; continue only with manual flight judgment.");
-      button.disabled = true;
-      return;
-    }
-    if (job.status === "failed") {
-      addText(panel, "div", "error", "Visualization failed: " + (job.error || "renderer unavailable"));
-      var retry = document.createElement("button");
-      retry.type = "button";
-      text(retry, "Retry visualization");
-      retry.addEventListener("click", requestVisualizations);
-      panel.appendChild(retry);
-      button.disabled = !hasSource;
-      return;
-    }
-    if (!job.source_frame_available || !Array.isArray(job.previews) || job.previews.length !== 3) {
-      addText(panel, "div", "error", "The visualization response is incomplete; no preview was presented as ready.");
-      button.disabled = !hasSource;
-      return;
-    }
-    addText(panel, "div", "visualization-notice", "AI visualization — illustrative creative reference, not flight truth.");
-    addText(panel, "div", "muted", "Renderer: " + (job.renderer_version || job.provenance || "unknown") + " · Source: " + (job.source_kind || provenance.mode || "unknown") + " / " + (job.source_label || source) + " · Frozen frame: " + (job.source_width || "?") + "×" + (job.source_height || "?") + " · Duration: 10 seconds");
-    var grid = document.createElement("div");
-    grid.className = "visualization-grid";
-    var selected = null;
-    job.previews.forEach(function (preview) {
-      var card = document.createElement("article");
-      card.className = "visualization-card " + preview.recommendation_status;
-      var stage = document.createElement("div");
-      stage.className = "concept-stage";
-      var image = document.createElement("img");
-      image.src = "/api/visualizations/" + encodeURIComponent(job.job_id) + "/source-frame";
-      image.alt = "Frozen source frame for " + preview.title;
-      image.className = preview.animation_profile;
-      stage.appendChild(image);
-      card.appendChild(stage);
-      addText(card, "h3", "rec-title", preview.title);
-      visualizationSection(card, "Animation", preview.cinematography_summary);
-      visualizationSection(card, "Story purpose", preview.story_purpose);
-      visualizationSection(card, "Visual objective", preview.visual_objective);
-      visualizationSection(card, "Why now", preview.why_now);
-      visualizationSection(card, "Manual guidance", preview.manual_execution_guidance);
-      visualizationSection(card, "Safety notes", preview.safety_notes);
-      var quality = (preview.quality_status || "pass").toUpperCase();
-      addText(card, "div", "status", "Quality: " + quality + " · Status: " + preview.recommendation_status + " · 10 seconds");
-      if (preview.quality_reasons && preview.quality_reasons.length) {
-        visualizationSection(card, "Quality notes", preview.quality_reasons.join("; "));
-      }
-      var actions = document.createElement("div");
-      actions.className = "rec-actions";
-      if (preview.recommendation_status === "suggested") {
-        var select = document.createElement("button");
-        select.type = "button";
-        text(select, "Select");
-        select.addEventListener("click", function () { select.disabled = true; decideRecommendation(preview.recommendation_id, "selected"); });
-        actions.appendChild(select);
-        var dismiss = document.createElement("button");
-        dismiss.type = "button";
-        dismiss.className = "secondary";
-        text(dismiss, "Dismiss");
-        dismiss.addEventListener("click", function () { dismiss.disabled = true; decideRecommendation(preview.recommendation_id, "dismissed"); });
-        actions.appendChild(dismiss);
-      }
-      if (preview.recommendation_status === "selected") {
-        var selectedDismiss = document.createElement("button");
-        selectedDismiss.type = "button";
-        selectedDismiss.className = "secondary";
-        text(selectedDismiss, "Dismiss");
-        selectedDismiss.addEventListener("click", function () { selectedDismiss.disabled = true; decideRecommendation(preview.recommendation_id, "dismissed"); });
-        actions.appendChild(selectedDismiss);
-        card.classList.add("selected");
-        selected = preview;
-      }
-      if (actions.firstChild) card.appendChild(actions);
-      grid.appendChild(card);
-    });
-    panel.appendChild(grid);
-    if (selected) renderManualBrief(panel, selected);
-    button.disabled = !hasSource;
-  }
-  function renderSource(source) {
-    if (!source) return;
-    var status = String(source.status || "connecting");
-    sourceLive = status === "live" || status === "fallback";
-    setPill("sourcePill", "Source: " + String(source.active_source || "?") + " · " + status, SOURCE_PILL_CLASS[status] || "warn");
-    var realBadge = byId("realBadge");
-    var realFeed = Boolean(source.is_real_source) && !source.fallback_active;
-    realBadge.className = "real-badge " + (realFeed ? "real" : "synthetic");
-    text(realBadge, realFeed ? "REAL SOURCE" : (source.fallback_active ? "SYNTHETIC FALLBACK" : "SYNTHETIC / GENERATED"));
-    text(byId("srcStatus"), status);
-    text(byId("srcRequested"), source.requested_source || "-");
-    text(byId("srcActive"), source.active_source || "-");
-    text(byId("srcFrameAge"), source.frame_age_sec == null ? "no frame" : Number(source.frame_age_sec).toFixed(1) + "s");
-    text(byId("srcFps"), source.fps == null ? "-" : Number(source.fps).toFixed(1));
-    text(byId("srcReconnects"), source.reconnect_count == null ? 0 : source.reconnect_count);
-    text(byId("srcUrl"), source.stream_url || "");
-    text(byId("srcReason"), status === "live" ? "" : "Source state: " + status + " — " + String(source.status_reason || ""));
-    var overlay = byId("monitorOverlay");
-    overlay.className = "monitor-overlay " + status;
-    if (status !== "live" && status !== "fallback") overlay.classList.add("visible");
-    text(byId("overlayTitle"),
-      status === "stale" ? "FEED STALE"
-      : status === "connecting" ? "CONNECTING TO SOURCE"
-      : status === "reconnecting" ? "RECONNECTING"
-      : status === "stopped" ? "SOURCE STOPPED"
-      : "SOURCE DISCONNECTED");
-    text(byId("overlayReason"), source.status_reason || "");
-    byId("critiqueWarning").classList.toggle("visible", Boolean(source.is_real_source) && status !== "live");
-  }
-  function completeShot(shotId) {
-    // Completion is a creator decision: only this button (never the model or
-    // a stream event) marks the manual capture done.
-    fetch("/api/shots/" + encodeURIComponent(shotId), { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ status:"COMPLETED", feedback:"Creator confirmed the manual capture is complete." }) }).then(function (response) { if (!response.ok) throw new Error("Shot completion was not accepted"); }).catch(function (error) { text(byId("intentStatus"), error.message); });
-  }
-  function recSection(card, label, value) { var section = document.createElement("div"); section.className = "rec-section"; addText(section, "div", "rec-label", label); addText(section, "div", "rec-text", value); card.appendChild(section); }
-  function decideRecommendation(id, decision) { var status = byId("intentStatus"); text(status, "Saving " + decision + " decision..."); return fetch("/api/recommendations/" + encodeURIComponent(id) + "/decision", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ decision:decision }) }).then(function (response) { if (!response.ok) throw new Error("Recommendation decision was not accepted"); text(status, "Decision saved. The server state is updating."); }).catch(function (error) { text(status, error.message); }); }
-  function renderRecommendations(items) { var panel = byId("recommendationPanel"); panel.textContent = ""; if (!items || !items.length) { addText(panel, "div", "empty", "No next-shot recommendations yet. The director is waiting for story-aware coverage guidance."); return; } items.forEach(function (rec) { var card = document.createElement("article"); card.className = "recommendation " + rec.status; var head = document.createElement("div"); head.className = "rec-head"; addText(head, "div", "rec-title", rec.title); addText(head, "div", "status", rec.status); card.appendChild(head); recSection(card, "Advances", rec.beat_id); recSection(card, "Story purpose", rec.story_purpose); recSection(card, "Visual objective", rec.visual_objective); recSection(card, "Why now", rec.why_now); recSection(card, "Manual attempt", rec.execution_guidance); recSection(card, "Safety notes", rec.safety_notes); if (rec.confidence != null) recSection(card, "Confidence", Math.round(rec.confidence * 100) + "%"); var actions = document.createElement("div"); actions.className = "rec-actions"; function action(label, value, secondary) { var button = document.createElement("button"); button.type = "button"; button.className = secondary ? "secondary" : ""; text(button, label); button.addEventListener("click", function () { button.disabled = true; decideRecommendation(rec.recommendation_id, value); }); actions.appendChild(button); } if (rec.status === "suggested") { action("Select", "selected", false); action("Dismiss", "dismissed", true); } if (rec.status === "selected") { action("Complete capture", "completed", false); action("Dismiss", "dismissed", true); } if (actions.firstChild) card.appendChild(actions); panel.appendChild(card); }); }
-  function decideTweak(critiqueId, tweakId, decision) { fetch("/api/critiques/" + encodeURIComponent(critiqueId) + "/tweaks/" + encodeURIComponent(tweakId) + "/decision", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ decision:decision }) }).catch(function () { text(byId("intentStatus"), "Critique decision was not accepted"); }); }
-  function renderCritique(critique) { var panel = byId("critiquePanel"); panel.textContent = ""; if (!critique) { addText(panel, "div", "empty", "The current-shot critique remains available when Gemini publishes one."); return; } addText(panel, "div", "critique-summary", critique.summary); (critique.tweaks || []).forEach(function (tweak) { var card = document.createElement("div"); card.className = "tweak-card"; addText(card, "div", "tweak-meta", tweak.category + " · " + tweak.priority + " · " + tweak.status); addText(card, "div", "tweak-copy", tweak.diagnosis); addText(card, "div", "tweak-copy", tweak.recommendation); addText(card, "div", "tweak-rationale", tweak.rationale); if (tweak.safety_note) addText(card, "div", "tweak-safety", "Pilot must verify: " + tweak.safety_note); if (tweak.status === "PROPOSED" || tweak.status === "ACCEPTED") { var actions = document.createElement("div"); actions.className = "rec-actions"; ["accepted", "acted", "dismissed"].forEach(function (decision) { var button = document.createElement("button"); button.type = "button"; button.className = decision === "acted" ? "" : "secondary"; text(button, decision); button.addEventListener("click", function () { decideTweak(critique.critique_id, tweak.tweak_id, decision); }); actions.appendChild(button); }); card.appendChild(actions); } panel.appendChild(card); }); }
-  function renderShots(shots) { var panel = byId("shotList"); panel.textContent = ""; Object.keys(shots || {}).forEach(function (id) { var shot = shots[id], card = document.createElement("div"); card.className = "shot"; var head = document.createElement("div"); head.className = "shot-head"; addText(head, "span", "", shot.title); addText(head, "span", "status", shot.status); card.appendChild(head); addText(card, "div", "shot-feedback", shot.feedback); if (shot.status !== "COMPLETED") { var done = document.createElement("button"); done.type = "button"; done.className = "shot-complete-btn"; text(done, "Mark captured & completed"); done.addEventListener("click", function () { completeShot(id); }); card.appendChild(done); } panel.appendChild(card); }); if (!panel.firstChild) addText(panel, "div", "empty", "No shot list state."); }
-  function renderState(state) { lastEventAt = Date.now(); setPill("connectionStatus", "State: live", "on"); renderSource(state.source); renderStory(state); renderCoverage(state); renderVisualizations(state); renderRecommendations(state.latest_recommendations); renderCritique(state.latest_critique); renderShots(state.shots); var metrics = state.metrics || {}; text(byId("fpsVal"), Number(metrics.fps || 0).toFixed(1)); text(byId("latencyVal"), Math.round(metrics.latency_ms || 0)); text(byId("framesVal"), metrics.frames_sent || 0); var provenance = state.provenance || {}; setPill("provenancePill", "Mode: " + (provenance.mode || "unknown"), provenance.mode === "deterministic_demo" ? "on" : ""); if (!state.source) setPill("sourcePill", "Source: " + (provenance.source || "unknown"), ""); var gemini = metrics.gemini_status || "Unknown"; setPill("geminiPill", "Gemini: " + gemini, gemini === "Connected" ? "on" : (gemini === "Disconnected" || gemini === "No API Key" ? "off" : "warn")); setPill("grafanaPill", "Grafana: " + (metrics.grafana_status || "Unknown"), metrics.grafana_status === "Live" ? "on" : "warn"); }
-  function loadState() { fetch("/api/state").then(function (response) { if (!response.ok) throw new Error("Could not load state"); return response.json(); }).then(renderState).catch(function (error) { setPill("connectionStatus", "State: error", "off"); var panel = byId("recommendationPanel"); panel.textContent = ""; addText(panel, "div", "error", error.message); }); }
-  var events = new EventSource("/events"); events.onmessage = function (event) { try { renderState(JSON.parse(event.data)); } catch (error) { setPill("connectionStatus", "State: error", "off"); } }; events.onerror = function () { setPill("connectionStatus", "State: disconnected", "off"); };
-  window.setInterval(function () { if (lastEventAt && Date.now() - lastEventAt > 3000) setPill("connectionStatus", "State: stale", "warn"); }, 1000);
-  function requestVisualizations() { var status = byId("visualizationStatus"); var button = byId("visualizeBtn"); button.disabled = true; status.textContent = ""; addText(status, "div", "stale", "Capturing the latest available frame and requesting three concepts…"); fetch("/api/visualizations", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ duration_seconds:10, variation_count:3 }) }).then(function (response) { if (!response.ok) return response.json().then(function (body) { throw new Error(body.detail || "Visualization request was not accepted"); }); return response.json(); }).then(function () { addText(status, "div", "muted", "Request accepted. Waiting for the frozen-frame concepts."); }).catch(function (error) { status.textContent = ""; addText(status, "div", "error", error.message); button.disabled = false; }); }
-  byId("visualizeBtn").addEventListener("click", requestVisualizations);
-  byId("intentForm").addEventListener("submit", function (event) { event.preventDefault(); var status = byId("intentStatus"); text(status, "Saving intent..."); var constraints = byId("constraints").value.split(",").map(function (item) { return item.trim(); }).filter(Boolean); fetch("/api/intent", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ shot_name:byId("shotName").value, creative_goal:byId("creativeGoal").value, subject:byId("subject").value, desired_feel:byId("desiredFeel").value, camera_move:byId("cameraMove").value, constraints:constraints }) }).then(function (response) { if (!response.ok) throw new Error("Intent could not be saved"); text(status, "Intent active."); }).catch(function (error) { text(status, error.message); }); });
-  fetch("/health").then(function (response) { return response.json(); }).then(function (health) { if (health.source) renderSource(health.source); else setPill("sourcePill", "Source: " + health.video_source, ""); }).catch(function () { setPill("sourcePill", "Source: unavailable", "off"); });
-  loadState();
+  function list(node, values, empty) { node.textContent = ""; (values && values.length ? values : [empty]).forEach(function (value) { add(node, "li", "", value); }); }
+  function fetchJson(url, options) { return fetch(url, options).then(function (response) { return response.json().then(function (body) { if (!response.ok) throw new Error(body.detail || "The action was not accepted"); return body; }); }); }
+  function sourceReady(source) { return source && source.status === "live" && source.frame_age_sec != null && source.frame_age_sec <= 2 && (source.is_real_source || source.active_source === "synthetic" || source.fallback_active); }
+  function renderSource(source) { source = source || {}; var live = Boolean(source.is_real_source && source.status === "live" && source.frame_age_sec != null && source.frame_age_sec <= 2); var synthetic = source.active_source === "synthetic" || source.fallback_active; setPill("sourcePill", "Source: " + (source.status || "unavailable"), live ? "on" : (synthetic && source.status === "live" ? "warn" : "off")); setPill("provenancePill", live ? "REAL SOURCE" : (synthetic && source.status === "live" ? (source.fallback_active ? "SYNTHETIC FALLBACK" : "SYNTHETIC SOURCE") : "NO LIVE SIGNAL"), live ? "on" : (synthetic ? "warn" : "off")); text(byId("realBadge"), live ? "REAL SOURCE" : (synthetic && source.status === "live" ? "SYNTHETIC FALLBACK" : "NO LIVE SIGNAL")); byId("realBadge").className = "real-badge " + (live ? "real" : (synthetic && source.status === "live" ? "synthetic" : "off")); text(byId("srcStatus"), source.status || "unavailable"); text(byId("srcRequested"), source.requested_source || "—"); text(byId("srcActive"), source.active_source || "—"); text(byId("srcFrameAge"), source.frame_age_sec == null ? "—" : source.frame_age_sec + "s"); text(byId("srcFps"), source.fps == null ? "—" : source.fps); text(byId("srcReconnects"), source.reconnect_count || 0); text(byId("srcReason"), source.status_reason || ""); var blocked = !live && !(synthetic && source.status === "live"); byId("monitorOverlay").classList.toggle("visible", blocked); text(byId("overlayTitle"), source.status === "stale" ? "STALE FRAME" : (source.status === "connecting" || source.status === "reconnecting" ? "SOURCE CONNECTING" : "NO LIVE SIGNAL")); text(byId("overlayReason"), source.status_reason || "A current frame is required."); }
+  function renderStory(state) { var story = state.story; if (!story) { text(byId("storyTitle"), "No story loaded"); text(byId("storyLogline"), "Enter the brief before asking for coverage advice."); return; } text(byId("storyTitle"), story.title); text(byId("storyLogline"), story.logline); text(byId("storyVersion"), "Story v" + state.story_version); var active = state.active_beat; text(byId("activeBeatTitle"), active ? active.title : "No active beat"); text(byId("activeBeatCopy"), active ? active.story_job + " Required proof: " + active.required_visual_proof : "The story is complete or awaiting a beat."); var rail = byId("beatRail"); rail.textContent = ""; (state.beats || []).forEach(function (beat, index) { var card = add(rail, "div", "beat " + beat.status); add(card, "div", "eyebrow", "Beat " + (index + 1)); add(card, "div", "beat-title", beat.title); add(card, "div", "beat-status", beat.status); }); }
+  function renderEvidence(job) { var result = job && job.result; list(byId("observedList"), result && result.observed, "No analysis burst yet."); list(byId("notEstablishedList"), result && result.not_established, "No analysis burst yet."); list(byId("missingList"), result && result.missing_coverage, "Enter story context and analyze a fresh take."); }
+  function recommendationCard(rec) { var fragment = document.createDocumentFragment(), card = add(fragment, "article", "card " + (rec.role === "primary" ? "primary " : "") + rec.status), head = add(card, "div", "card-head"); add(head, "div", "card-title", (rec.rank === 1 ? "Primary · " : "Alternative · ") + rec.title); add(head, "div", "status", rec.status); line(card, "Advances beat", rec.beat_id); line(card, "Diagnosis", rec.diagnosis); line(card, "Story purpose", rec.story_purpose); line(card, "Visual objective", rec.visual_objective); line(card, "Why now", rec.why_now); line(card, "Manual guidance", rec.execution_guidance); line(card, "Technical plausibility", rec.technical_plausibility); line(card, "Safety notes", rec.safety_notes); line(card, "Model judgment", rec.confidence == null ? "Not provided" : "Confidence " + Math.round(rec.confidence * 100) + "%"); var actions = add(card, "div", "actions"); if (rec.status === "recommended") { var select = add(actions, "button", "", rec.rank === 1 ? "Select primary" : "Select alternative"); select.type = "button"; select.addEventListener("click", function () { select.disabled = true; decideTake(rec.recommendation_id, "selected"); }); var dismiss = add(actions, "button", "secondary", "Dismiss"); dismiss.type = "button"; dismiss.addEventListener("click", function () { dismiss.disabled = true; decideTake(rec.recommendation_id, "dismissed"); }); } return fragment; }
+  function renderRecommendations(items) { var panel = byId("recommendationPanel"); panel.textContent = ""; if (!items || !items.length) { add(panel, "div", "empty", "No ranked recommendation yet."); return; } items.slice().sort(function (a,b) { return a.rank - b.rank; }).forEach(function (rec) { panel.appendChild(recommendationCard(rec)); }); }
+  function renderDecision(state) { var panel = byId("decisionPanel"); panel.textContent = ""; var selected = (state.take_recommendations || []).find(function (rec) { return rec.status === "selected" || rec.status === "acted"; }); if (!selected) { add(panel, "div", "empty", "Select a recommendation to create the manual capture brief. Selection is not capture or proof of usefulness."); return; } var brief = add(panel, "div", "brief"); add(brief, "h3", "", "Manual capture brief · pilot decides"); add(brief, "p", "support", "Selection is not capture completion. The pilot remains responsible for all flight decisions."); line(brief, "Story purpose", selected.story_purpose); line(brief, "Visual objective", selected.visual_objective); line(brief, "Intended framing/movement", selected.execution_guidance); line(brief, "Why this shot is next", selected.why_now); line(brief, "Safety notes", selected.safety_notes + " Pilot remains responsible for flight decisions."); if (selected.status === "selected") { var actions = add(brief, "div", "actions"), captured = add(actions, "button", "", "Mark take captured"); captured.type = "button"; captured.addEventListener("click", function () { captured.disabled = true; markCaptured(selected.recommendation_id); }); } }
+  function renderEvaluation(state) { var panel = byId("evaluationPanel"); panel.textContent = ""; var capture = (state.capture_records || [])[0], evaluation = (state.evaluation_records || [])[0]; if (!capture) { add(panel, "div", "empty", "After the pilot manually captures the selected take, mark it captured and request a new evidence burst for evaluation."); return; } line(panel, "Creator capture", "Marked captured at " + capture.captured_at + " · " + (capture.notes || "No note")); if (evaluation) { var box = add(panel, "div", "status-box " + (evaluation.outcome === "addressed" ? "" : "warn")); text(box, evaluation.outcome.replaceAll("_", " ").toUpperCase() + " · " + evaluation.explanation); } else { var actions = add(panel, "div", "actions"), button = add(actions, "button", "", "Evaluate captured take"); button.type = "button"; button.addEventListener("click", function () { button.disabled = true; requestEvaluation(capture.capture_id); }); add(panel, "p", "support", "Evaluation uses a new fresh burst. It does not prove production quality improved."); } }
+  function renderHistory(state) { var panel = byId("historyPanel"); panel.textContent = ""; var rows = (state.capture_records || []).map(function (capture) { var evaluation = (state.evaluation_records || []).find(function (item) { return item.capture_id === capture.capture_id; }); return {capture:capture,evaluation:evaluation}; }); if (!rows.length) { add(panel, "div", "empty", "No creator-confirmed captures or model evaluations yet."); return; } rows.forEach(function (row) { var item = add(panel, "div", "history-row"); add(item, "span", "", "Captured " + row.capture.captured_at); add(item, "span", "status", row.evaluation ? row.evaluation.outcome.replaceAll("_", " ") : "awaiting evaluation"); }); }
+  function renderSystem(state) { var panel = byId("systemPanel"); panel.textContent = ""; var source = state.source || {}, metrics = state.metrics || {}; [["Frame age", source.frame_age_sec == null ? "—" : source.frame_age_sec + "s"],["Capture FPS", source.fps || 0],["Reconnects", source.reconnect_count || 0],["Provider", metrics.gemini_status || "unknown"],["SSE state", Date.now() - lastEventAt < 3000 ? "current" : "stale"],["Raw media", "deleted after processing"],["Legacy critique", state.latest_critique ? "available" : "idle"],["Grafana", metrics.grafana_status || "unknown"]].forEach(function (pair) { var item = add(panel, "div", "system-item", pair[0]); add(item, "b", "", pair[1]); }); }
+  function renderVisualization(job) { var panel = byId("visualizationPanel"); panel.textContent = ""; if (!job) { add(panel, "div", "empty", "No visual references yet."); return; } if (job.status === "requested" || job.status === "rendering") { add(panel, "div", "empty", "Rendering three bounded illustrative references from the frozen source frame..."); return; } if (job.status === "failed") { add(panel, "div", "empty", "The visual reference job failed. Retry when the source is ready."); return; } (job.previews || []).forEach(function (preview) { var card = add(panel, "article", "visualization-card"), frame = add(card, "div", "visualization-frame"), image = document.createElement("img"); image.src = "/api/visualizations/" + encodeURIComponent(job.job_id) + "/source-frame?preview=" + encodeURIComponent(preview.preview_id); image.alt = preview.title + " illustrative visual reference"; frame.appendChild(image); var copy = add(card, "div", "visualization-copy"); add(copy, "div", "eyebrow", preview.animation_profile.replaceAll("_", " ")); add(copy, "h3", "", preview.title); line(copy, "Cinematography summary", preview.cinematography_summary); line(copy, "Story purpose", preview.story_purpose); line(copy, "Visual objective", preview.visual_objective); line(copy, "Why now", preview.why_now); line(copy, "Manual guidance", preview.manual_execution_guidance); line(copy, "Safety notes", preview.safety_notes); }); if (!(job.previews || []).length) add(panel, "div", "empty", "No previews were returned by the renderer."); }
+  function renderVisualizationStatus(job, can) { var status = byId("visualizationStatus"); status.className = "status-box"; status.textContent = ""; if (visualizationTask) { add(status, "span", "", "Visual reference job " + visualizationTask.status + ": the frozen source frame is being rendered."); return; } if (job && job.status === "ready") { text(status, "Three illustrative references are ready. They are not live evidence or flight guidance."); return; } if (job && job.status === "failed") { status.className = "status-box error"; text(status, "Visual reference failed: " + (job.error || "renderer unavailable") + " Retry when the source and recommendations are ready."); return; } text(status, can ? "Ready to create three illustrative references from the current source frame." : "Analyze a current take first, then request three illustrative concepts."); }
+  function requestVisualization() { var button = byId("visualizeBtn"); button.disabled = true; byId("visualizationStatus").className = "status-box warn"; text(byId("visualizationStatus"), "Freezing the current source frame and rendering three illustrative references..."); fetchJson("/api/visualizations", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({duration_seconds:10,variation_count:3})}).then(function () { text(byId("visualizationStatus"), "Visual reference requested. Waiting for the bounded renderer..."); }).catch(function (error) { byId("visualizationStatus").className = "status-box error"; text(byId("visualizationStatus"), error.message); button.disabled = false; }); }
+  function selectTab(tabId, moveFocus) { var coverageTab = byId("coverageDeskTab"), visualTab = byId("visualReferenceTab"), coveragePanel = byId("coverageDeskPanel"), visualPanel = byId("visualReferencePanel"), visual = tabId === "visualReferenceTab"; coverageTab.setAttribute("aria-selected", String(!visual)); visualTab.setAttribute("aria-selected", String(visual)); coverageTab.tabIndex = visual ? -1 : 0; visualTab.tabIndex = visual ? 0 : -1; coveragePanel.hidden = visual; visualPanel.hidden = !visual; if (moveFocus) (visual ? visualTab : coverageTab).focus(); }
+  function setupTabs() { var tabs = [byId("coverageDeskTab"), byId("visualReferenceTab")]; tabs.forEach(function (tab, index) { tab.addEventListener("click", function () { selectTab(tab.id, false); }); tab.addEventListener("keydown", function (event) { var target = null; if (event.key === "ArrowRight" || event.key === "ArrowDown") target = tabs[(index + 1) % tabs.length]; if (event.key === "ArrowLeft" || event.key === "ArrowUp") target = tabs[(index + tabs.length - 1) % tabs.length]; if (event.key === "Home") target = tabs[0]; if (event.key === "End") target = tabs[tabs.length - 1]; if (target) { event.preventDefault(); selectTab(target.id, true); } }); }); }
+  function cancelAnalysis(jobId) { fetchJson("/api/analysis/" + encodeURIComponent(jobId) + "/cancel", {method:"POST"}).catch(function (error) { text(byId("analysisStatus"), error.message); }); }
+  function renderState(state) { lastEventAt = Date.now(); setPill("connectionStatus", "State: current", "on"); renderSource(state.source); renderStory(state); renderEvidence(state.latest_analysis_job); renderRecommendations(state.take_recommendations); renderDecision(state); renderEvaluation(state); renderHistory(state); renderSystem(state); renderVisualization(state.latest_visualization_job); var consent = state.consent && state.consent.granted; setPill("consentPill", consent ? "Cloud consent: granted" : "Cloud consent: required", consent ? "on" : "warn"); var job = state.latest_analysis_job; analysisTask = job && ["requested","capturing","analyzing"].indexOf(job.status) >= 0 ? job : null; var can = Boolean(state.story && state.active_beat && state.intent && consent && sourceReady(state.source) && !analysisTask); byId("analyzeBtn").disabled = !can; var status = byId("analysisStatus"); status.className = "status-box"; status.textContent = ""; if (analysisTask) { add(status, "span", "", "Analysis " + analysisTask.status + ": the burst is frozen for this job."); var cancel = add(status, "button", "secondary", "Cancel analysis"); cancel.type = "button"; cancel.style.marginLeft = "10px"; cancel.addEventListener("click", function () { cancel.disabled = true; cancelAnalysis(analysisTask.job_id); }); } else if (job && job.status === "ready") text(status, "Fresh burst analyzed. Choose one next shot or dismiss the options."); else if (job && (job.status === "failed" || job.status === "timed_out")) { status.className = "status-box error"; text(status, (job.status === "timed_out" ? "Analysis timed out. " : "Analysis failed: ") + (job.error || "provider unavailable") + " Retry when the source and provider are ready."); } else if (job && job.status === "cancelled") { status.className = "status-box warn"; text(status, "Analysis cancelled safely. The source and story state are unchanged; retry when ready."); } else text(status, can ? "Ready for an explicit fresh evidence burst." : "Story, beat, shot intent, fresh source, and cloud consent are required."); var visualizationJob = state.latest_visualization_job; visualizationTask = visualizationJob && ["requested","rendering"].indexOf(visualizationJob.status) >= 0 ? visualizationJob : null; var visualizationReady = Boolean(state.latest_recommendations && state.latest_recommendations.length >= 3) || Boolean(state.take_recommendations && state.take_recommendations.length >= 3); var canVisualize = Boolean(state.story && state.active_beat && state.intent && consent && sourceReady(state.source) && visualizationReady && !visualizationTask); byId("visualizeBtn").disabled = !canVisualize; renderVisualizationStatus(visualizationJob, canVisualize); }
+  function saveStory(event) { event.preventDefault(); text(byId("storyStatus"), "Saving story context..."); var lines = function (id) { return byId(id).value.split(/\r?\n/).map(function (item) { return item.trim(); }).filter(Boolean); }; var beats = [{title:byId("beatTitleInput").value,story_job:byId("beatJobInput").value,required_visual_proof:byId("beatProofInput").value}]; lines("additionalBeatsInput").forEach(function (item) { var parts = item.split("|").map(function (part) { return part.trim(); }); if (parts.length === 3 && parts.every(Boolean)) beats.push({title:parts[0],story_job:parts[1],required_visual_proof:parts[2]}); }); var body = {title:byId("storyTitleInput").value,logline:byId("loglineInput").value,emotional_arc:byId("arcInput").value,visual_style:byId("styleInput").value,must_show:lines("mustShowInput"),constraints:lines("constraintsInput"),beats:beats,active_beat_index:0,shot_intent:{shot_name:byId("shotNameInput").value,creative_goal:byId("creativeGoalInput").value,subject:byId("subjectInput").value}}; fetchJson("/api/story", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(function () { return setConsent(byId("consentInput").checked); }).then(function () { text(byId("storyStatus"), "Story context saved."); }).catch(function (error) { text(byId("storyStatus"), error.message); }); }
+  function setConsent(granted) { return fetchJson("/api/consent", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({granted:granted})}); }
+  function analyze() { var button = byId("analyzeBtn"); button.disabled = true; byId("analysisStatus").className = "status-box warn"; text(byId("analysisStatus"), "Capturing a fresh evidence burst..."); fetchJson("/api/analysis", {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}).then(function () { text(byId("analysisStatus"), "Analysis requested. Waiting for the frozen burst and bounded provider response..."); }).catch(function (error) { byId("analysisStatus").className = "status-box error"; text(byId("analysisStatus"), error.message); button.disabled = false; }); }
+  function decideTake(id, decision) { fetchJson("/api/take-recommendations/" + encodeURIComponent(id) + "/decision", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({decision:decision,reason:"Creator decision from Live Coverage Desk."})}).catch(function (error) { text(byId("analysisStatus"), error.message); }); }
+  function markCaptured(id) { fetchJson("/api/take-recommendations/" + encodeURIComponent(id) + "/capture", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({notes:"Creator marked the manually captured take."})}).catch(function (error) { text(byId("analysisStatus"), error.message); }); }
+  function requestEvaluation(id) { fetchJson("/api/captures/" + encodeURIComponent(id) + "/evaluate", {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}).catch(function (error) { text(byId("analysisStatus"), error.message); }); }
+  byId("storyForm").addEventListener("submit", saveStory); byId("consentInput").addEventListener("change", function () { setConsent(this.checked).catch(function (error) { text(byId("storyStatus"), error.message); }); }); byId("analyzeBtn").addEventListener("click", analyze); byId("visualizeBtn").addEventListener("click", requestVisualization); setupTabs();
+  var events = new EventSource("/events"); events.onmessage = function (event) { try { renderState(JSON.parse(event.data)); } catch (error) { setPill("connectionStatus", "State: invalid update", "off"); } }; events.onerror = function () { setPill("connectionStatus", "State: disconnected", "off"); }; window.setInterval(function () { if (lastEventAt && Date.now() - lastEventAt > 3000) setPill("connectionStatus", "State: stale", "warn"); }, 1000);
+  fetchJson("/api/state").then(renderState).catch(function (error) { setPill("connectionStatus", "State: error", "off"); text(byId("analysisStatus"), error.message); });
 }());
 </script>
 </body>

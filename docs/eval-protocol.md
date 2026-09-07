@@ -101,3 +101,19 @@ Any evaluation on real drone footage must additionally:
 
 Until that evaluation exists, real-source metrics (frame age, FPS,
 reconnect counts, schema validity) are engineering diagnostics only.
+
+## Live Coverage Desk evaluation unit
+
+The primary unit is one explicit analysis job tied to one creator-entered story
+version, active beat, shot-intent version, and fresh observation burst. A
+follow-up evaluation is a different job and must use a different observation
+ID and fresh burst. The initial model result is reported as observed,
+not-established, missing-coverage, one primary recommendation, and two
+alternatives. Creator selection, creator capture confirmation, model
+evaluation, and independent usefulness grading are separate events.
+
+The model evaluation outcomes are `addressed`, `not_addressed`, `unclear`, and
+`insufficient_evidence`. An `addressed` result is not a production-quality
+claim, and it does not automatically mark a beat covered. A synthetic or
+deterministic result can demonstrate state transitions and UI recovery only;
+it cannot establish usefulness or faster decisions.

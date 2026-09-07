@@ -73,6 +73,10 @@ class DirectorAgent:
 
     async def run(self) -> None:
         """Main loop: connect, stream, and reconnect on failure."""
+        if not settings.ENABLE_CONTINUOUS_LIVE:
+            self.app_state.update_metrics(gemini_status="Explicit analysis only")
+            await self._stop_event.wait()
+            return
         if self.app_state.snapshot()["provenance"]["mode"] == "deterministic_demo":
             self.app_state.update_metrics(gemini_status="Deterministic Demo")
             await self._stop_event.wait()
@@ -344,8 +348,21 @@ class DirectorAgent:
     async def _handle_tool_call(self, session: Any, tool_call: Any) -> None:
         function_responses = []
         for fc in getattr(tool_call, "function_calls", None) or []:
-            name = fc.name
-            args = dict(fc.args or {})
+            name = getattr(fc, "name", "unknown_tool")
+            raw_args = getattr(fc, "args", {})
+            if raw_args is None:
+                raw_args = {}
+            if not isinstance(raw_args, dict):
+                self.app_state.record_malformed_tool_call(name, "function_arguments_not_object")
+                function_responses.append(
+                    types.FunctionResponse(
+                        id=getattr(fc, "id", None),
+                        name=name,
+                        response={"ok": False, "error": "function arguments must be an object"},
+                    )
+                )
+                continue
+            args = dict(raw_args)
             logger.info("Tool call from Gemini: %s(%s)", name, args)
             result = execute_tool(
                 self.app_state,

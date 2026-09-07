@@ -6,7 +6,9 @@ This file contains reference detail for implementation. `AGENTS.md` contains beh
 
 - Python 3.10+.
 - FastAPI serves the browser and JSON/SSE interfaces.
-- Gemini Live is optional at startup and required only for live AI reasoning.
+- Gemini is optional at startup. The primary workflow calls it only after an
+  explicit between-takes analysis request; the legacy continuous Gemini Live
+  path is disabled unless explicitly enabled for compatibility experiments.
 - Session state is in memory; evidence is appended to `EVENT_LOG_PATH` as JSONL.
 - Video source values are `synthetic`, `rtmp`, `rtsp`, `webcam`, or `file`.
 - The application is advisory-only. No route or tool may issue drone-control commands.
@@ -80,6 +82,49 @@ The story-aware demo adds these models without weakening current contracts:
 
 The exact field names and limits must be introduced with tests and documented in an ADR or this section in the same commit. Model-provided IDs and statuses remain forbidden.
 
+### Primary live coverage contracts
+
+`StoryContextInput` is the creator-entered story form. It accepts story
+metadata, ordered beat inputs, an active beat index, and current shot intent;
+the server assigns the story ID, beat IDs, and versions. A story or intent
+loaded only by demo seeding is not sufficient for the primary live path.
+
+`ConsentState` is session-scoped and starts absent. `POST /api/consent` records
+the creator's explicit decision. No cloud analysis request is accepted without
+granted consent.
+
+`ObservationBurst` contains a server-owned observation ID, job ID, story and
+intent versions, source requested/active values, source provenance, freshness
+limit, timestamps, and three to eight frame metadata records. Raw bytes are
+not written to the event log or retained after the bounded analysis worker
+ends. Only frames within `SOURCE_MAX_FRAME_AGE_SEC` are eligible. A follow-up
+evaluation must have a different observation ID.
+
+`AnalysisJob` uses `requested -> capturing -> analyzing -> ready` with terminal
+`failed`, `timed_out`, or `cancelled` states. A job is accepted only when the
+story, active beat, intent, consent, and current source are ready. One job
+performs at most one bounded Gemini multimodal request. Duplicate active
+requests return `409`; failed jobs may be retried explicitly.
+
+`TakeAnalysisResult` separates `observed`, `not_established`, and
+`missing_coverage`, then requires exactly three strict recommendation inputs.
+The server adds IDs, ranking, role, observation reference, timestamp, and
+provenance, enforcing one primary at rank 1 and two alternatives at ranks 2
+and 3. Generic or unsafe control-like advice is rejected without mutation.
+
+The creator workflow uses separate records and routes:
+
+| Action | Route | Meaning |
+| --- | --- | --- |
+| Select/dismiss | `POST /api/take-recommendations/{id}/decision` | Creator decision only |
+| Mark captured | `POST /api/take-recommendations/{id}/capture` | Creator says the manual take was captured |
+| Evaluate | `POST /api/captures/{id}/evaluate` | Starts a new fresh observation and model evaluation |
+
+Selection creates a manual capture brief. Capture does not create observed
+proof or mark a beat covered. Evaluation returns `addressed`,
+`not_addressed`, `unclear`, or `insufficient_evidence`; it is model judgment,
+not independent usefulness review or proof that production quality improved.
+
 `ShotRecommendationInput` is the untrusted Gemini/browser shape. It accepts no
 recommendation ID, timestamp, status, intent version, or prompt version. The
 server adds those fields when it publishes a validated batch of two or three
@@ -96,9 +141,11 @@ python main.py --source synthetic --demo-mode
 ```
 
 Story beats use `pending -> active -> covered` or `active -> skipped`.
-Recommendations use `suggested -> selected -> completed`, with dismissal from
-suggested or selected. Completion records capture and advances coverage; it is
-not an evaluation that the resulting shot improved.
+The legacy recommendation path retains `suggested -> selected -> completed`
+for backward compatibility, but completion cannot cover an unrelated active
+beat. The primary live path uses `recommended -> selected -> acted`, with the
+creator capture record and follow-up evaluation separate from coverage
+completion.
 
 ## Visualization contracts and API
 
@@ -147,12 +194,14 @@ story, coverage, recommendation, and provenance fields.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | empty | Enables live Gemini reasoning |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini Live model |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Bounded Gemini model |
+| `ENABLE_CONTINUOUS_LIVE` | `false` | Explicit opt-in for legacy continuous Gemini Live |
+| `ANALYSIS_TIMEOUT_SEC` | `30.0` | Maximum time for one bounded provider request |
 | `RTMP_URL` | local RTMP URL | Default RTMP/RTSP input |
 | `GRAFANA_URL` | empty | Optional Loki endpoint |
 | `GRAFANA_USER` | empty | Loki tenant/user |
 | `GRAFANA_API_KEY` | empty | Loki token |
-| `FRAME_INTERVAL_SEC` | `0.8` | Frame sampling interval |
+| `FRAME_INTERVAL_SEC` | `0.8` | Legacy Live sampling interval |
 | `CRITIQUE_COOLDOWN_SEC` | `5.0` | Duplicate critique suppression window |
 | `EVENT_LOG_PATH` | `runs/cinepilot-events.jsonl` | Local append-only evidence log |
 | `HOST` | `127.0.0.1` | Server bind host |
@@ -162,8 +211,9 @@ story, coverage, recommendation, and provenance fields.
 
 - Invalid model output is recorded and cannot mutate canonical state.
 - Gemini reconnects with the current intent context.
-- A dropped source falls back to synthetic video and exposes provenance.
+- A dropped real source stays disconnected/reconnecting and exposes `NO LIVE SIGNAL`; synthetic fallback requires explicit opt-in and is prominently labeled.
+- A source is eligible for analysis only when status is live and the newest frame is within the shared freshness limit.
 - Event-log failures are logged but do not stop the live loop.
 - Missing Gemini credentials leave the shell usable and report a visible disconnected state.
 - No safety-critical flight advice is presented as an automated command or guarantee.
-- Visualize concepts are labeled `AI visualization — illustrative creative reference, not flight truth.` and retain deterministic/live-source provenance separately.
+- The Visual Reference tab is secondary to Coverage Desk. Visualize concepts are labeled `AI visualization — illustrative creative reference, not flight truth.` and retain deterministic/live-source provenance separately. The tab is enabled only when the current context, fresh source, consent, and three recommendations are available.

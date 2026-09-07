@@ -23,13 +23,26 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from config import settings
+from analysis import (
+    AnalysisProviderError,
+    capture_fresh_burst,
+    deterministic_analysis,
+    gemini_analysis,
+    gemini_evaluation,
+)
 from event_log import EventLog
 from schemas import (
+    ConsentRequest,
+    AnalysisJobStatus,
+    CaptureRequest,
+    EvaluationOutcome,
+    EvaluationRequest,
     IntentUpdateRequest,
     RecommendationDecisionRequest,
     ShotRecommendationBatchInput,
     ShotUpdateRequest,
     StoryBeatRequest,
+    StoryContextInput,
     TweakDecisionRequest,
     VisualizationRequestInput,
     VisualizationSourceKind,
@@ -47,6 +60,7 @@ app_state = AppState(EventLog(settings.EVENT_LOG_PATH))
 # Injected by main.py before the server starts.
 video_manager: Optional[VideoStreamManager] = None
 demo_provider = None
+analysis_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 def set_video_manager(manager: VideoStreamManager) -> None:
@@ -95,6 +109,231 @@ async def story() -> JSONResponse:
             "provenance": snapshot["provenance"],
         }
     )
+
+
+@app.post("/api/story")
+async def create_story(payload: StoryContextInput) -> JSONResponse:
+    try:
+        version = app_state.load_story_context(payload)
+    except (StateNotFoundError, InvalidDecisionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    snapshot = app_state.snapshot()
+    return JSONResponse(
+        {
+            "ok": True,
+            "story": snapshot["story"],
+            "story_version": version,
+            "intent_version": snapshot["intent_version"],
+        }
+    )
+
+
+@app.post("/api/consent")
+async def update_consent(payload: ConsentRequest) -> JSONResponse:
+    consent = app_state.set_consent(payload.granted)
+    return JSONResponse({"ok": True, "consent": consent.model_dump(mode="json")})
+
+
+def _source_can_be_analyzed() -> tuple[bool, str]:
+    if video_manager is None:
+        return False, "video source is unavailable"
+    source = video_manager.status_snapshot()
+    age = source.get("frame_age_sec")
+    if source.get("status") != "live":
+        return False, f"source is {source.get('status', 'unavailable')}"
+    if age is None or age > settings.SOURCE_MAX_FRAME_AGE_SEC:
+        return False, "current frame is stale"
+    if not (
+        source.get("is_real_source")
+        or source.get("active_source") == "synthetic"
+        or source.get("fallback_active")
+    ):
+        return False, "source provenance is not eligible for analysis"
+    return True, ""
+
+
+def _analysis_context() -> dict:
+    snapshot = app_state.snapshot()
+    return {
+        "story": snapshot.get("story"),
+        "active_beat": snapshot.get("active_beat"),
+        "shot_intent": snapshot.get("intent"),
+        "current_shot_contribution": snapshot.get("current_shot_contribution"),
+        "prior_missing_coverage": snapshot.get("missing_coverage"),
+    }
+
+
+async def _run_take_analysis(job_id: str) -> None:
+    images: list[bytes] = []
+    try:
+        job = app_state.update_analysis_status(job_id, AnalysisJobStatus.CAPTURING)
+        source = video_manager
+        if source is None:
+            raise AnalysisProviderError("video source is unavailable")
+        burst, images = await asyncio.to_thread(
+            capture_fresh_burst,
+            source,
+            job_id=job_id,
+            story_version=job.story_version,
+            intent_version=job.intent_version,
+            beat_id=job.beat_id,
+            provenance=app_state.snapshot()["provenance"].get("mode", "live"),
+        )
+        app_state.update_analysis_status(job_id, AnalysisJobStatus.ANALYZING)
+        context = _analysis_context()
+        if app_state.snapshot()["provenance"].get("mode") == "deterministic_demo":
+            result = deterministic_analysis(context)
+            provider = "deterministic_demo"
+        else:
+            result = await asyncio.wait_for(
+                gemini_analysis(images, context), timeout=settings.ANALYSIS_TIMEOUT_SEC
+            )
+            provider = "gemini"
+        app_state.publish_take_analysis(job_id, burst, result, provider)
+    except asyncio.CancelledError:
+        app_state.fail_analysis(job_id, AnalysisJobStatus.CANCELLED, "analysis cancelled")
+    except asyncio.TimeoutError:
+        app_state.fail_analysis(job_id, AnalysisJobStatus.TIMED_OUT, "analysis timed out")
+    except (AnalysisProviderError, ValueError, InvalidDecisionError) as exc:
+        status = AnalysisJobStatus.FAILED
+        app_state.fail_analysis(job_id, status, str(exc))
+    finally:
+        images.clear()
+        analysis_tasks.pop(job_id, None)
+
+
+async def _run_evaluation(job_id: str, capture_id: str) -> None:
+    images: list[bytes] = []
+    try:
+        job = app_state.update_analysis_status(job_id, AnalysisJobStatus.CAPTURING)
+        source = video_manager
+        if source is None:
+            raise AnalysisProviderError("video source is unavailable")
+        snapshot = app_state.snapshot()
+        capture = next(item for item in snapshot["capture_records"] if item["capture_id"] == capture_id)
+        recommendation = next(
+            item for item in snapshot["take_recommendations"]
+            if item["recommendation_id"] == capture["recommendation_id"]
+        )
+        burst, images = await asyncio.to_thread(
+            capture_fresh_burst,
+            source,
+            job_id=job_id,
+            story_version=job.story_version,
+            intent_version=job.intent_version,
+            beat_id=job.beat_id,
+            provenance=snapshot["provenance"].get("mode", "live"),
+        )
+        app_state.update_analysis_status(job_id, AnalysisJobStatus.ANALYZING)
+        context = _analysis_context()
+        context.update({"selected_recommendation": recommendation, "capture": capture})
+        if snapshot["provenance"].get("mode") == "deterministic_demo":
+            outcome, explanation, provider = (
+                EvaluationOutcome.UNCLEAR,
+                "Synthetic follow-up evidence is fresh but cannot establish independent production usefulness.",
+                "deterministic_demo",
+            )
+        else:
+            evaluated = await asyncio.wait_for(
+                gemini_evaluation(images, context), timeout=settings.ANALYSIS_TIMEOUT_SEC
+            )
+            outcome, explanation, provider = evaluated.outcome, evaluated.explanation, "gemini"
+        app_state.publish_evaluation(job_id, capture_id, burst, outcome, explanation, provider)
+    except asyncio.CancelledError:
+        app_state.fail_analysis(job_id, AnalysisJobStatus.CANCELLED, "evaluation cancelled")
+    except asyncio.TimeoutError:
+        app_state.fail_analysis(job_id, AnalysisJobStatus.TIMED_OUT, "evaluation timed out")
+    except (AnalysisProviderError, ValueError, InvalidDecisionError, StopIteration) as exc:
+        app_state.fail_analysis(job_id, AnalysisJobStatus.FAILED, str(exc))
+    finally:
+        images.clear()
+        analysis_tasks.pop(job_id, None)
+
+
+@app.post("/api/analysis")
+async def request_analysis() -> JSONResponse:
+    # Consent is deliberately checked before source readiness so the UI explains
+    # the privacy decision that must be made before any cloud request.
+    if not app_state.snapshot()["consent"]["granted"]:
+        raise HTTPException(status_code=409, detail="cloud analysis consent is required")
+    ready, reason = _source_can_be_analyzed()
+    if not ready:
+        raise HTTPException(status_code=409, detail=reason)
+    try:
+        job = app_state.request_analysis_job()
+    except (StateNotFoundError, InvalidDecisionError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    analysis_tasks[job.job_id] = asyncio.create_task(_run_take_analysis(job.job_id))
+    return JSONResponse(job.model_dump(mode="json"), status_code=202)
+
+
+@app.get("/api/analysis/{job_id}")
+async def get_analysis(job_id: str) -> JSONResponse:
+    job = next((item for item in app_state.snapshot()["analysis_jobs"] if item["job_id"] == job_id), None)
+    if job is None:
+        raise HTTPException(status_code=404, detail="analysis job not found")
+    return JSONResponse(job)
+
+
+@app.post("/api/analysis/{job_id}/cancel")
+async def cancel_analysis(job_id: str) -> JSONResponse:
+    task = analysis_tasks.get(job_id)
+    if task is None:
+        job = next((item for item in app_state.snapshot()["analysis_jobs"] if item["job_id"] == job_id), None)
+        if job is None:
+            raise HTTPException(status_code=404, detail="analysis job not found")
+        return JSONResponse(job)
+    task.cancel()
+    return JSONResponse({"ok": True, "job_id": job_id, "status": "cancelling"})
+
+
+@app.post("/api/take-recommendations/{recommendation_id}/decision")
+async def decide_take_recommendation(
+    recommendation_id: str, payload: RecommendationDecisionRequest
+) -> JSONResponse:
+    try:
+        if payload.decision.value == "selected":
+            recommendation = app_state.select_take_recommendation(recommendation_id, payload.reason)
+        elif payload.decision.value == "dismissed":
+            recommendation = app_state.dismiss_take_recommendation(recommendation_id, payload.reason)
+        else:
+            raise InvalidDecisionError("a take recommendation can only be selected or dismissed")
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "recommendation": recommendation.model_dump(mode="json")})
+
+
+@app.post("/api/take-recommendations/{recommendation_id}/capture")
+async def mark_take_captured(recommendation_id: str, payload: CaptureRequest) -> JSONResponse:
+    try:
+        source = video_manager.status_snapshot() if video_manager is not None else app_state.snapshot()["source"]
+        capture = app_state.mark_take_captured(
+            recommendation_id,
+            payload.notes,
+            source.get("provenance", app_state.snapshot()["provenance"].get("mode", "unknown")),
+        )
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse({"ok": True, "capture": capture.model_dump(mode="json")})
+
+
+@app.post("/api/captures/{capture_id}/evaluate")
+async def evaluate_capture(capture_id: str, _payload: EvaluationRequest) -> JSONResponse:
+    ready, reason = _source_can_be_analyzed()
+    if not ready:
+        raise HTTPException(status_code=409, detail=reason)
+    try:
+        job = app_state.request_evaluation_job(capture_id)
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    analysis_tasks[job.job_id] = asyncio.create_task(_run_evaluation(job.job_id, capture_id))
+    return JSONResponse(job.model_dump(mode="json"), status_code=202)
 
 
 @app.post("/api/story/beat")
@@ -160,7 +399,11 @@ def _visualization_source() -> tuple[VisualizationSourceKind, str]:
 
 def _latest_visualization_frame() -> bytes | None:
     if video_manager is not None:
-        frame = video_manager.get_jpeg_bytes(quality=90, max_dim=1024)
+        frame = video_manager.get_fresh_jpeg(
+            quality=90,
+            max_dim=1024,
+            max_age_sec=settings.SOURCE_MAX_FRAME_AGE_SEC,
+        )
         if frame is not None:
             return frame
     snapshot = app_state.snapshot()
@@ -273,6 +516,17 @@ async def update_intent(payload: IntentUpdateRequest) -> JSONResponse:
             "ok": True,
             "intent_version": version,
             "intent": payload.model_dump(mode="json"),
+        }
+    )
+
+
+@app.get("/api/intent")
+async def get_intent() -> JSONResponse:
+    intent, version = app_state.intent_context()
+    return JSONResponse(
+        {
+            "intent": intent.model_dump(mode="json") if intent else None,
+            "intent_version": version,
         }
     )
 

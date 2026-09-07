@@ -21,18 +21,26 @@ Beats:
 ### Intended walkthrough
 
 1. Start `python main.py --source synthetic --demo-mode` and open the monitor.
-2. Load the seeded story and show the five ordered beats.
-3. Show the live drone feed or synthetic aerial scene.
-4. Ask CinePilot what the current shot proves and what story coverage is missing.
-5. Show two or three recommendations with story purpose, visual objective, why now, and manual execution guidance.
-6. Select “Descending reveal” and explain that selection is a creator decision, not an automated flight command.
-7. In the existing dashboard, click “Visualize this place” during a safe hover or after a short evidence burst.
-8. Show exactly three 10-second concepts over the frozen source frame, each labeled “AI visualization — illustrative creative reference, not flight truth.”
-9. Select one concept and show its manual capture brief: story purpose, visual objective, why now, guidance, and safety notes. Explain that selection is not capture, coverage completion, or proof of improvement.
-10. Capture or simulate the next take and mark the linked recommendation completed.
-11. Show Discovery moving to covered and the next missing beat becoming active.
-12. Explain that completion records capture and coverage state; the next result
-   must be evaluated separately.
+2. Show the seeded story and five ordered beats; explain that this seed is an
+   explicitly labeled demo source, not the primary live story workflow.
+3. Show the source badge and wait for a current frame.
+4. Give explicit cloud consent, then press **Analyze current take** once
+   between takes. No continuous advice is expected while maneuvering.
+5. Show the fresh burst progress, then the separate observed, not established,
+   and missing coverage sections.
+6. Show exactly one ranked primary recommendation and two alternatives with
+   story purpose, diagnosis, visual objective, why now, technical plausibility,
+   manual guidance, safety notes, and model uncertainty.
+7. Select one option and explain that selection is a creator decision, not an
+   automated flight command. Show the manual capture brief.
+8. Manually capture or simulate the take, press **Mark take captured**, then
+   press **Evaluate captured take**.
+9. Show that evaluation uses a new burst and returns addressed,
+   not-addressed, unclear, or insufficient-evidence. It does not prove quality
+   improvement or automatically mark a beat covered.
+10. Open the secondary **Visual Reference** tab and request concepts only after
+    the current recommendation result exists. Keep it labeled “AI visualization
+    — illustrative creative reference, not flight truth.”
 
 ### Real-place source variant
 
@@ -45,7 +53,8 @@ the same three fixed screen-space profiles. A real source makes the reference
 visually grounded in that place; it does not turn the 2D motion into a physical
 camera path, a reconstruction, or a safety assessment.
 
-If the source is disconnected, the Visualize action must remain unavailable.
+If the source is disconnected or stale, **Analyze current take** and evaluation
+must remain unavailable and show `NO LIVE SIGNAL`.
 If rendering fails, show the failure and retry without changing story
 coverage. Do not present a provider-backed or spatial-previs claim from this
 deterministic source variant.

@@ -21,6 +21,8 @@ from schemas import (
     VisualizationJobStatus,
     VisualizationRequestInput,
     VisualizationPreview,
+    RecommendationRole,
+    TakeRecommendation,
 )
 from state import AppState, InvalidDecisionError
 
@@ -181,6 +183,46 @@ def test_visualization_job_lifecycle_freezes_frame_and_renders_three_previews(tm
     assert ready["renderer_version"] == "deterministic-screen-space-v2"
     assert all(item["profile_spec"]["profile"] == item["animation_profile"] for item in ready["previews"])
     assert state.get_visualization_source_frame(job.job_id) == jpeg_bytes()
+
+
+def test_visualization_can_use_primary_take_recommendations(tmp_path) -> None:
+    state = make_state(tmp_path)
+    state.latest_recommendations = []
+    state._analysis_job_order = ["take-analysis-1"]
+    for rank in range(1, 4):
+        recommendation = TakeRecommendation(
+            recommendation_id=f"take-recommendation-{rank}",
+            analysis_job_id="take-analysis-1",
+            observation_id="take-observation-1",
+            beat_id="discovery",
+            title=f"Take concept {rank}",
+            diagnosis="The next story proof is not established.",
+            story_purpose="Let the audience find the lodge.",
+            visual_objective="Make the lodge readable in its landscape.",
+            why_now="Discovery remains the next missing beat.",
+            execution_guidance="Manually hold a safe, readable composition.",
+            technical_plausibility="A restrained manual take is plausible.",
+            safety_notes="The pilot remains responsible for flight decisions.",
+            role=RecommendationRole.PRIMARY if rank == 1 else RecommendationRole.ALTERNATIVE,
+            rank=rank,
+            created_at="2026-09-08T00:00:00+00:00",
+            provenance="deterministic_demo",
+        )
+        state.take_recommendations[recommendation.recommendation_id] = recommendation
+
+    job = state.request_visualization(
+        VisualizationRequestInput(duration_seconds=10, variation_count=3),
+        jpeg_bytes(),
+        "deterministic_demo",
+    )
+
+    ready = wait_for_status(state, job.job_id)
+    assert ready["status"] == VisualizationJobStatus.READY.value
+    assert [item["title"] for item in ready["previews"]] == [
+        "Take concept 1",
+        "Take concept 2",
+        "Take concept 3",
+    ]
 
 
 def test_duplicate_visualization_request_returns_existing_job(tmp_path) -> None:

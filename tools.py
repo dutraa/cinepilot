@@ -291,6 +291,13 @@ def execute_speak_director_guidance(
 
     if not instruction:
         return {"ok": False, "error": "instruction must be a non-empty string"}
+    if len(instruction) > 180:
+        _record_malformed(app_state, "speak_director_guidance", "instruction_too_long")
+        return {"ok": False, "error": "instruction exceeds the advisory length limit"}
+    prohibited = ("autonomous", "waypoint", "geofence", "take off", "land now", "return home")
+    if any(term in instruction.casefold() for term in prohibited):
+        _record_malformed(app_state, "speak_director_guidance", "unsafe_instruction_policy")
+        return {"ok": False, "error": "instruction is outside the advisory-only policy"}
     if priority not in ALLOWED_PRIORITIES:
         priority = "INFO"
 

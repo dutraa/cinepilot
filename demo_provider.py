@@ -140,7 +140,24 @@ class DeterministicDemoProvider:
         if context is None or context["active_beat"] is None:
             return []
         beat_id = context["active_beat"]["beat_id"]
+        # The deterministic legacy demo can recommend the next pending beat
+        # after a creator completion without pretending the unrelated active
+        # beat was observed or covered.
+        if any(beat["status"] == "covered" for beat in context["story"]["beats"]):
+            next_pending = next(
+                (beat["beat_id"] for beat in context["story"]["beats"] if beat["status"] == "pending"),
+                None,
+            )
+            if next_pending:
+                beat_id = next_pending
         copy = _RECOMMENDATION_COPY.get(beat_id, _RECOMMENDATION_COPY["confidence"])
+        beat_statuses = context["story"]["beats"]
+        status_by_id = {beat["beat_id"]: beat["status"] for beat in beat_statuses}
+        copy = [
+            item for item in copy if status_by_id.get(item["beat_id"]) not in {"covered", "skipped"}
+        ]
+        if len(copy) < 2:
+            return []
         inputs = [ShotRecommendationInput(**item) for item in copy]
         observation_id = context["current_shot_contribution"].get(
             "observation_id", f"deterministic-observation-{beat_id}"

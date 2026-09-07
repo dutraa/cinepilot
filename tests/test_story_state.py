@@ -45,9 +45,11 @@ def test_story_state_publishes_and_completes_a_recommendation(tmp_path) -> None:
     assert selected.value == "selected"
     assert completed.value == "completed"
     snapshot = state.snapshot()
-    assert snapshot["beat_statuses"]["isolation"] == "covered"
+    # Completing a recommendation records only the recommendation's target
+    # beat; it cannot falsely claim an unrelated active beat was covered.
+    assert snapshot["beat_statuses"]["isolation"] == "active"
     assert snapshot["beat_statuses"]["discovery"] == "covered"
-    assert snapshot["active_beat"]["beat_id"] == "invitation"
+    assert snapshot["active_beat"]["beat_id"] == "isolation"
     assert snapshot["coverage"][1]["beat_id"] == "discovery"
 
 
