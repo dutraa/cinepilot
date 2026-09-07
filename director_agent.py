@@ -23,21 +23,12 @@ from google import genai
 from google.genai import types
 
 from config import settings
+from director_prompt import SYSTEM_INSTRUCTION, intent_message, story_message
 from grafana_publisher import GrafanaPublisher
 from tools import DIRECTOR_TOOLS, execute_tool
 from video_stream import VideoStreamManager
 
 logger = logging.getLogger("cinepilot.agent")
-
-SYSTEM_INSTRUCTION = (
-    "You are CinePilot, an expert aerial cinematography director for high-end "
-    "film production. You watch incoming drone video frames continuously. You "
-    "evaluate framing, rule-of-thirds, gimbal tilt, horizon alignment, "
-    "lighting, and pacing. You actively maintain the 5-part shot list by "
-    "calling `update_shot_list` when a shot succeeds or needs re-attempting, "
-    "and you issue direct, vocal flight commands to the pilot via "
-    "`speak_director_guidance`."
-)
 
 RECONNECT_BASE_DELAY = 2.0
 RECONNECT_MAX_DELAY = 30.0
@@ -65,6 +56,11 @@ class DirectorAgent:
         self._last_frame_sent_at = 0.0
         self._rolling_fps = 0.0
         self._latency_ms = 0.0
+        self._last_intent_version = 0
+        self._last_story_context_version = 0
+        self._observation_counter = 0
+        self._last_observation_id = "unknown-observation"
+        self._gemini_reconnects = 0
 
         self.app_state.update_metrics(grafana_status=self.grafana.status)
 
@@ -77,6 +73,10 @@ class DirectorAgent:
 
     async def run(self) -> None:
         """Main loop: connect, stream, and reconnect on failure."""
+        if self.app_state.snapshot()["provenance"]["mode"] == "deterministic_demo":
+            self.app_state.update_metrics(gemini_status="Deterministic Demo")
+            await self._stop_event.wait()
+            return
         if not settings.GEMINI_API_KEY:
             logger.error(
                 "GEMINI_API_KEY is not set. The Director's Monitor will run, "
@@ -99,7 +99,11 @@ class DirectorAgent:
             except Exception as exc:  # noqa: BLE001 - reconnect on any failure
                 logger.error("Gemini Live session error: %s", exc)
                 logger.debug("%s", traceback.format_exc())
-                self.app_state.update_metrics(gemini_status="Disconnected")
+                self._gemini_reconnects += 1
+                self.app_state.update_metrics(
+                    gemini_status="Disconnected",
+                    gemini_reconnects=self._gemini_reconnects,
+                )
                 if self._stop_event.is_set():
                     break
                 logger.info("Reconnecting to Gemini Live in %.1fs...", delay)
@@ -142,6 +146,8 @@ class DirectorAgent:
         ) as session:
             logger.info("Gemini Live session established")
             self.app_state.update_metrics(gemini_status="Connected")
+            await self._sync_story(session, force=True)
+            await self._sync_intent(session, force=True)
 
             sender = asyncio.create_task(self._frame_sender(session))
             receiver = asyncio.create_task(self._response_receiver(session))
@@ -172,14 +178,22 @@ class DirectorAgent:
     # ------------------------------------------------------------------
 
     async def _frame_sender(self, session: Any) -> None:
-        """Sample frames at FRAME_INTERVAL_SEC and stream them to Gemini."""
+        """Sample frames at FRAME_INTERVAL_SEC and stream them to Gemini.
+
+        Only fresh frames are sent: a frame older than
+        SOURCE_MAX_FRAME_AGE_SEC (or from a disconnected source) is never
+        presented to the model as a current observation.
+        """
         interval = max(settings.FRAME_INTERVAL_SEC, 0.1)
         while not self._stop_event.is_set():
             started = time.monotonic()
-            jpeg = await asyncio.to_thread(
-                self.video_manager.get_jpeg_bytes, 80, 1024
-            )
+            await self._sync_story(session)
+            await self._sync_intent(session)
+            jpeg = await asyncio.to_thread(self._sample_fresh_jpeg)
             if jpeg is not None:
+                self._observation_counter += 1
+                self._last_observation_id = f"observation-{self._observation_counter}"
+                self._record_observation()
                 await self._send_frame(session, jpeg)
                 self._frames_sent += 1
                 now = time.monotonic()
@@ -198,6 +212,62 @@ class DirectorAgent:
                 )
             elapsed = time.monotonic() - started
             await asyncio.sleep(max(interval - elapsed, 0.05))
+
+    def _sample_fresh_jpeg(self) -> Optional[bytes]:
+        """Grab a fresh JPEG; count frames withheld because they were stale."""
+        if hasattr(self.video_manager, "get_fresh_jpeg"):
+            jpeg = self.video_manager.get_fresh_jpeg(80, 1024)
+            if jpeg is None and self._has_stale_frame():
+                self.app_state.record_stale_frame_skipped()
+            return jpeg
+        return self.video_manager.get_jpeg_bytes(80, 1024)
+
+    def _has_stale_frame(self) -> bool:
+        if not hasattr(self.video_manager, "status_snapshot"):
+            return False
+        snapshot = self.video_manager.status_snapshot()
+        age = snapshot.get("frame_age_sec")
+        return age is not None and age > settings.SOURCE_MAX_FRAME_AGE_SEC
+
+    def _record_observation(self) -> None:
+        if not hasattr(self.app_state, "record_frame_observation"):
+            return
+        provenance, status = "unknown", "unknown"
+        if hasattr(self.video_manager, "status_snapshot"):
+            snapshot = self.video_manager.status_snapshot()
+            provenance = snapshot.get("provenance", "unknown")
+            status = snapshot.get("status", "unknown")
+        self.app_state.record_frame_observation(
+            self._last_observation_id, provenance, status
+        )
+
+    async def _sync_intent(self, session: Any, force: bool = False) -> None:
+        """Send the latest creator intent once per version and after reconnect."""
+        intent, version = self.app_state.intent_context()
+        if intent is None or (not force and version == self._last_intent_version):
+            return
+        await session.send_client_content(
+            turns=types.Content(
+                role="user",
+                parts=[types.Part(text=intent_message(intent.model_dump(mode="json"), version))],
+            ),
+            turn_complete=True,
+        )
+        self._last_intent_version = version
+
+    async def _sync_story(self, session: Any, force: bool = False) -> None:
+        """Send story context once per canonical story/coverage version."""
+        context, version = self.app_state.story_context()
+        if context is None or (not force and version == self._last_story_context_version):
+            return
+        await session.send_client_content(
+            turns=types.Content(
+                role="user",
+                parts=[types.Part(text=story_message(context, version))],
+            ),
+            turn_complete=True,
+        )
+        self._last_story_context_version = version
 
     async def _send_frame(self, session: Any, jpeg: bytes) -> None:
         """Send one JPEG frame as realtime video input.
@@ -277,7 +347,12 @@ class DirectorAgent:
             name = fc.name
             args = dict(fc.args or {})
             logger.info("Tool call from Gemini: %s(%s)", name, args)
-            result = execute_tool(self.app_state, name, args)
+            result = execute_tool(
+                self.app_state,
+                name,
+                args,
+                observation_id=self._last_observation_id,
+            )
             self.grafana.publish_tool_call(name, args, result)
             function_responses.append(
                 types.FunctionResponse(id=fc.id, name=name, response=result)
