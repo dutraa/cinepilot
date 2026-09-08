@@ -116,7 +116,7 @@ cp .env.example .env
 
 ```ini
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.1-flash-live-preview
 RTMP_URL=rtmp://127.0.0.1:1935/live/drone
 GRAFANA_URL=
 GRAFANA_USER=
