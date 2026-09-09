@@ -693,6 +693,11 @@ not mutate state.
 
 **Type:** HITL — later scope decision.
 
+**Status update (2026-09-09):** the integration is implemented behind a
+default-off gate; see Issue 21. The comparison and approval record required
+below have *not* been produced, so the provider stays off by default and no
+outcome claim is permitted.
+
 **Goal:** Decide whether measured demand and evidence justify adding a live
   video-generation provider after the deterministic concept-animation path is
   usable. This issue is not part of the deterministic release cut line.
@@ -1092,6 +1097,76 @@ dashboard without turning it into a gallery or automation console.
   independent grading, and release sign-off.
 
 **Dependencies:** 10.1–10.7; ratified `docs/evidence-frame.md`.
+
+## Issue 21 — Provider-backed AI previsualization (implemented 2026-09-09)
+
+**Status:** Implemented behind an explicit, default-off configuration gate.
+This closes the engineering half of Issues 9.7 and 10.3–10.4. The evidence
+half — the held-out manual comparator and the independent usefulness review —
+remains open and still gates any outcome claim or public demo.
+
+**What was built:**
+
+- `visualization.VisualizationRenderer` is now a real provider-neutral
+  protocol (`name`, `version`, `model`, `prompt_version`, `render_kind`,
+  `supported_durations`, `render(RenderContext)`).
+  `DeterministicVisualizationRenderer` remains the fallback and the test
+  double; `google_video.GoogleVideoRenderer` is the provider implementation.
+- Two Google backends against the installed `google-genai` SDK:
+  `gemini-omni-1.1-flash` through `client.interactions.create` (default, chosen
+  first because it takes text plus a source image in one multimodal request and
+  returns a short video), and Veo 3.1 through `client.models.generate_videos`
+  as the configurable alternative for image-to-video control.
+- One bounded generation request per existing `ShotRecommendation`, prompted
+  only from server-owned source context plus that recommendation's story
+  purpose, visual objective, title, why-now, manual execution guidance, and
+  safety notes. The prompt requires a single continuous shot with no cuts and
+  explicitly forbids inventing a flight route or certifying safety.
+- Generated clips are session-local temporary files, validated for response
+  structure, MIME type, existence, size ceiling, container magic, decodability,
+  dimensions, frame count, and playable duration before the job can become
+  `ready`. They are deleted on failure, retry, story reset, eviction, and
+  shutdown.
+- Duration is reconciled explicitly. The deterministic renderer delivers
+  exactly 10 seconds; Google models deliver 4, 6, or 8. A job carries
+  `requested_duration_seconds`, the delivered `duration_seconds`, and a
+  `duration_note`. A shorter clip is never relabeled as 10 seconds.
+- New route `GET /api/visualizations/{job_id}/previews/{preview_id}/media`
+  serves one validated clip; the four existing routes are unchanged. No
+  provider call happens inside an HTTP request path.
+- The event ledger records job ID, recommendation IDs, provider, model, prompt
+  version, source-frame hash, source provenance, requested and ready/failed
+  timestamps, requested and delivered duration, validation result, media
+  hashes, and retry count. Creator selection stays on the existing
+  `recommendation_decision` event.
+
+**Acceptance criteria met:**
+
+- Deterministic and provider-backed renderers produce the identical strict job
+  and preview response shape (asserted by test).
+- Provider failure marks only the job failed and leaves story state,
+  recommendations, creator decisions, and the live director loop unchanged.
+- Retry reuses the job ID and increments `retry_count`; failed and malformed
+  attempts stay in the denominator.
+- With no key configured, the application runs the deterministic renderer and
+  labels it `provider: deterministic`, `model: none`. Deterministic output is
+  never presented as Google output.
+- No test requires a live Google API key; a fake client covers every path.
+
+**Still open:**
+
+- Live Google verification has not been exercised. No real key was configured
+  in this environment, so no real generation request was made.
+- The provider scorecard from Issue 10.4 (cost, rate limits, retention policy,
+  regional availability, content policy, per-provider temporal stability) is
+  not filled in. `GOOGLE_VIDEO_MODEL` and `GOOGLE_VIDEO_BACKEND` are defaults,
+  not an approved product decision.
+- Issue 10.5 place/temporal consistency gates beyond decodability and duration
+  are not implemented; `quality_status` still means "the contract is valid",
+  not "the pixels are faithful to the place".
+- The held-out manual baseline and independent review remain unrun, so the
+  internal go/no-go gate in `docs/evidence-frame.md` is not satisfied and no
+  outcome claim may be made.
 
 ## Issue 10 execution order and cut line
 

@@ -8,8 +8,10 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import server
-import state as state_module
-from visualization import render_deterministic_previews
+from visualization import (
+    DeterministicVisualizationRenderer,
+    render_deterministic_previews,
+)
 from demo_provider import DeterministicDemoProvider
 from event_log import EventLog
 from schemas import (
@@ -19,6 +21,7 @@ from schemas import (
     RecommendationDecision,
     VisualizationJob,
     VisualizationJobStatus,
+    VisualizationRenderKind,
     VisualizationRequestInput,
     VisualizationPreview,
     RecommendationRole,
@@ -33,8 +36,27 @@ def jpeg_bytes(value: int = 0) -> bytes:
     return encoded.tobytes()
 
 
-def make_state(tmp_path) -> AppState:
-    state = AppState(EventLog(str(tmp_path / "events.jsonl")))
+class ScriptedRenderer(DeterministicVisualizationRenderer):
+    """A deterministic renderer whose behavior each test can script."""
+
+    def __init__(self, behavior=None) -> None:
+        self.calls = 0
+        self._behavior = behavior
+
+    def render(self, context):
+        self.calls += 1
+        if self._behavior is not None:
+            outcome = self._behavior(self, context)
+            if outcome is not None:
+                return outcome
+        return super().render(context)
+
+
+def make_state(tmp_path, renderer=None) -> AppState:
+    state = AppState(
+        EventLog(str(tmp_path / "events.jsonl")),
+        visualization_renderer=renderer or DeterministicVisualizationRenderer(),
+    )
     DeterministicDemoProvider().seed(state)
     return state
 
@@ -51,6 +73,47 @@ def wait_for_status(state: AppState, job_id: str, expected: str = "ready") -> di
 
 def test_visualization_request_accepts_only_the_fixed_request() -> None:
     assert VisualizationRequestInput(duration_seconds=10, variation_count=3)
+
+
+@pytest.mark.parametrize("duration", [4, 6, 8, 10])
+def test_visualization_request_accepts_every_reconcilable_duration(duration) -> None:
+    """A provider clip length is a valid ask; the job reports what was delivered."""
+    assert VisualizationRequestInput(duration_seconds=duration, variation_count=3)
+
+
+def test_deterministic_job_declares_its_render_kind_and_true_duration(tmp_path) -> None:
+    state = make_state(tmp_path)
+    job = state.request_visualization(
+        VisualizationRequestInput(duration_seconds=10, variation_count=3),
+        jpeg_bytes(),
+        "deterministic_demo",
+    )
+    ready = wait_for_status(state, job.job_id)
+
+    assert ready["render_kind"] == VisualizationRenderKind.DETERMINISTIC_ANIMATION.value
+    assert ready["provider"] == "deterministic"
+    assert ready["model"] == "none"
+    assert ready["requested_duration_seconds"] == 10
+    assert ready["duration_seconds"] == 10
+    assert ready["duration_note"] == ""
+    assert all(item["media"] is None for item in ready["previews"])
+    assert all(
+        item["profile_spec"]["profile"] == item["animation_profile"] for item in ready["previews"]
+    )
+
+
+def test_a_shorter_request_is_reconciled_against_the_deterministic_renderer(tmp_path) -> None:
+    state = make_state(tmp_path)
+    job = state.request_visualization(
+        VisualizationRequestInput(duration_seconds=4, variation_count=3),
+        jpeg_bytes(),
+        "deterministic_demo",
+    )
+    ready = wait_for_status(state, job.job_id)
+
+    assert ready["requested_duration_seconds"] == 4
+    assert ready["duration_seconds"] == 10
+    assert "not 4" in ready["duration_note"]
 
 
 @pytest.mark.parametrize("payload", [{"duration_seconds": 9, "variation_count": 3}, {"duration_seconds": 10, "variation_count": 2}])
@@ -233,26 +296,25 @@ def test_duplicate_visualization_request_returns_existing_job(tmp_path) -> None:
     assert first.job_id == second.job_id
 
 
-def test_failed_visualization_request_can_retry_same_job(tmp_path, monkeypatch) -> None:
-    state = make_state(tmp_path)
-    calls = {"count": 0}
-
-    def flaky_renderer(*args, **kwargs):
-        calls["count"] += 1
-        if calls["count"] == 1:
+def test_failed_visualization_request_can_retry_same_job(tmp_path) -> None:
+    def flaky(renderer, context):
+        if renderer.calls == 1:
             raise RuntimeError("temporary provider failure")
-        return render_deterministic_previews(*args, **kwargs)
+        return None
 
-    monkeypatch.setattr(state_module, "render_deterministic_previews", flaky_renderer)
+    renderer = ScriptedRenderer(flaky)
+    state = make_state(tmp_path, renderer)
     request = VisualizationRequestInput(duration_seconds=10, variation_count=3)
     first = state.request_visualization(request, jpeg_bytes(), "deterministic_demo")
     failed = wait_for_status(state, first.job_id, expected="failed")
     assert failed["status"] == "failed"
+    assert failed["retry_count"] == 0
     retry = state.request_visualization(request, jpeg_bytes(), "deterministic_demo")
     assert retry.job_id == first.job_id
     ready = wait_for_status(state, first.job_id)
     assert ready["status"] == "ready"
-    assert calls["count"] == 2
+    assert ready["retry_count"] == 1
+    assert renderer.calls == 2
 
 
 def test_selecting_linked_preview_is_idempotent_and_does_not_complete_coverage(tmp_path) -> None:
@@ -322,18 +384,16 @@ def test_visualization_api_rejects_invalid_payload_and_missing_observation(tmp_p
     assert client.post("/api/visualizations", json={"duration_seconds": 10, "variation_count": 3}).status_code == 409
 
 
-def test_different_observation_conflicts_while_rendering(tmp_path, monkeypatch) -> None:
-    state = make_state(tmp_path)
+def test_different_observation_conflicts_while_rendering(tmp_path) -> None:
     started = threading.Event()
     release = threading.Event()
-    original = state_module.render_deterministic_previews
 
-    def slow_renderer(*args, **kwargs):
+    def slow(renderer, context):
         started.set()
         release.wait(timeout=2)
-        return original(*args, **kwargs)
+        return None
 
-    monkeypatch.setattr(state_module, "render_deterministic_previews", slow_renderer)
+    state = make_state(tmp_path, ScriptedRenderer(slow))
     request = VisualizationRequestInput(duration_seconds=10, variation_count=3)
     state.request_visualization(request, jpeg_bytes(1), "deterministic_demo")
     assert started.wait(timeout=1)
@@ -342,13 +402,11 @@ def test_different_observation_conflicts_while_rendering(tmp_path, monkeypatch) 
     release.set()
 
 
-def test_renderer_failure_marks_job_failed_and_removes_temporary_frame(tmp_path, monkeypatch) -> None:
-    state = make_state(tmp_path)
-
-    def failing_renderer(*args, **kwargs):
+def test_renderer_failure_marks_job_failed_and_removes_temporary_frame(tmp_path) -> None:
+    def failing(renderer, context):
         raise RuntimeError("deterministic renderer unavailable")
 
-    monkeypatch.setattr(state_module, "render_deterministic_previews", failing_renderer)
+    state = make_state(tmp_path, ScriptedRenderer(failing))
     job = state.request_visualization(
         VisualizationRequestInput(duration_seconds=10, variation_count=3), jpeg_bytes(3), "deterministic_demo"
     )

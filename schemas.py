@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, confloat, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, confloat, conint, field_validator, model_validator
 
 
 class TweakCategory(str, Enum):
@@ -91,6 +91,22 @@ class AnimationProfile(str, Enum):
     DESCENDING_REVEAL = "descending_reveal"
     LATERAL_PARALLAX = "lateral_parallax"
     RESTRAINED_PULL_AWAY = "restrained_pull_away"
+
+
+class VisualizationRenderKind(str, Enum):
+    """What a preview actually is, so the UI can never conflate the two."""
+
+    # A screen-space CSS animation over the frozen JPEG. No pixels are invented.
+    DETERMINISTIC_ANIMATION = "deterministic_animation"
+    # A provider-generated video clip. Illustrative creative reference only.
+    GENERATED_VIDEO = "generated_video"
+
+
+class VisualizationMediaMimeType(str, Enum):
+    """Browser-playable container formats accepted from a provider."""
+
+    MP4 = "video/mp4"
+    WEBM = "video/webm"
 
 
 class AnalysisJobKind(str, Enum):
@@ -461,9 +477,16 @@ class RecommendationDecisionRequest(StrictModel):
 
 
 class VisualizationRequestInput(StrictModel):
-    """The only browser/provider input accepted by the visualize workflow."""
+    """The only browser input accepted by the previsualization workflow.
 
-    duration_seconds: Literal[10]
+    ``duration_seconds`` is the duration the creator *requests*. It is not a
+    promise about the delivered clip: the deterministic renderer produces
+    exactly 10 seconds of screen-space motion, while current Google video
+    models emit 4, 6, or 8 second clips. The server reconciles the two on the
+    job and every preview reports its real duration.
+    """
+
+    duration_seconds: Literal[4, 6, 8, 10]
     variation_count: Literal[3]
 
 
@@ -496,8 +519,35 @@ class AnimationProfileSpec(StrictModel):
         return self
 
 
+class GeneratedMediaRef(StrictModel):
+    """Server-owned, validated metadata for one session-local generated clip.
+
+    Provider output is untrusted. A preview may only reference media that the
+    server itself wrote to a session-local temporary file, decoded, measured,
+    and size-checked. The bytes never travel through this contract.
+    """
+
+    media_id: str = Field(min_length=1, max_length=80)
+    mime_type: VisualizationMediaMimeType
+    byte_size: conint(ge=1, le=268435456)
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    measured_duration_seconds: confloat(ge=0.2, le=60.0)
+    frame_count: conint(ge=1, le=20000)
+    width: conint(ge=16, le=8192)
+    height: conint(ge=16, le=8192)
+    available: bool = True
+
+
 class VisualizationPreview(StrictModel):
-    """Server-owned metadata for a browser animation over a frozen JPEG."""
+    """Server-owned metadata for one illustrative previsualization concept.
+
+    A preview is either a deterministic screen-space animation over the frozen
+    JPEG (no pixels invented) or a provider-generated video clip. Both are
+    illustrative creative references. Neither is live evidence, guaranteed
+    camera movement, drone-flight guidance, proof that the shot is safe, proof
+    that production quality improved, or proof that the recommendation was
+    acted on.
+    """
 
     preview_id: str = Field(min_length=1, max_length=80)
     job_id: str = Field(min_length=1, max_length=80)
@@ -510,9 +560,18 @@ class VisualizationPreview(StrictModel):
     why_now: str = Field(min_length=1, max_length=500)
     manual_execution_guidance: str = Field(min_length=1, max_length=600)
     safety_notes: str = Field(min_length=1, max_length=600)
-    duration_seconds: Literal[10]
+    render_kind: VisualizationRenderKind = VisualizationRenderKind.DETERMINISTIC_ANIMATION
+    # The real duration of this preview, never the requested duration.
+    duration_seconds: conint(ge=1, le=60)
+    requested_duration_seconds: conint(ge=1, le=60) = 10
+    duration_note: str = Field(default="", max_length=240)
     animation_profile: AnimationProfile
     profile_spec: AnimationProfileSpec | None = None
+    media: GeneratedMediaRef | None = None
+    provider: str = Field(default="deterministic", min_length=1, max_length=60)
+    model: str = Field(default="none", min_length=1, max_length=120)
+    prompt_version: str = Field(default="none", min_length=1, max_length=60)
+    source_frame_sha256: str = Field(default="", max_length=64, pattern=r"^[0-9a-f]{64}$|^$")
     quality_status: VisualizationQualityStatus = VisualizationQualityStatus.PASS
     quality_reasons: list[str] = Field(default_factory=list, max_length=5)
     source_frame_available: bool
@@ -521,6 +580,18 @@ class VisualizationPreview(StrictModel):
 
     @model_validator(mode="after")
     def populate_profile_spec(self) -> "VisualizationPreview":
+        if self.render_kind == VisualizationRenderKind.GENERATED_VIDEO:
+            # A generated clip has no server-fixed screen-space motion; the
+            # profile name only labels the intended visual concept.
+            if self.profile_spec is not None:
+                raise ValueError("generated previews cannot carry a screen-space profile spec")
+            if self.media is None:
+                raise ValueError("generated previews must reference validated media")
+            return self
+        if self.media is not None:
+            raise ValueError("deterministic previews cannot reference generated media")
+        if self.duration_seconds != 10:
+            raise ValueError("deterministic previews are exactly 10 seconds")
         if self.profile_spec is not None:
             if self.profile_spec.profile != self.animation_profile:
                 raise ValueError("profile spec must match animation profile")
@@ -564,9 +635,19 @@ class VisualizationPreview(StrictModel):
 
 
 class VisualizationJob(StrictModel):
+    """One asynchronous previsualization job for the current session.
+
+    ``duration_seconds`` is the duration actually delivered by the active
+    renderer. ``requested_duration_seconds`` is what the creator asked for.
+    When they differ, ``duration_note`` states the reconciliation in plain
+    text; the job never relabels a shorter generated clip as 10 seconds.
+    """
+
     job_id: str = Field(min_length=1, max_length=80)
     request_fingerprint: str = Field(min_length=1, max_length=128)
-    duration_seconds: Literal[10]
+    duration_seconds: conint(ge=1, le=60)
+    requested_duration_seconds: conint(ge=1, le=60) = 10
+    duration_note: str = Field(default="", max_length=240)
     variation_count: Literal[3]
     story_version: int = Field(ge=0)
     beat_id: str = Field(min_length=1, max_length=80)
@@ -579,7 +660,12 @@ class VisualizationJob(StrictModel):
     provenance: str = Field(min_length=1, max_length=40)
     source_kind: VisualizationSourceKind = VisualizationSourceKind.UNKNOWN
     source_label: str = Field(default="unknown", min_length=1, max_length=80)
+    render_kind: VisualizationRenderKind = VisualizationRenderKind.DETERMINISTIC_ANIMATION
+    provider: str = Field(default="deterministic", min_length=1, max_length=60)
+    model: str = Field(default="none", min_length=1, max_length=120)
+    prompt_version: str = Field(default="none", min_length=1, max_length=60)
     renderer_version: str = Field(default="unknown", min_length=1, max_length=80)
+    retry_count: int = Field(default=0, ge=0, le=50)
     source_frame_sha256: str = Field(default="", max_length=64, pattern=r"^[0-9a-f]{64}$|^$")
     source_width: int = Field(default=0, ge=0, le=8192)
     source_height: int = Field(default=0, ge=0, le=8192)
@@ -597,6 +683,10 @@ class VisualizationJob(StrictModel):
             self.previews or self.source_frame_available
         ):
             raise ValueError("failed visualization jobs cannot retain previews or source frames")
+        if any(preview.render_kind != self.render_kind for preview in self.previews):
+            raise ValueError("visualization previews must match the job render kind")
+        if self.duration_seconds != self.requested_duration_seconds and not self.duration_note:
+            raise ValueError("a reconciled duration requires an explicit duration note")
         return self
 
 

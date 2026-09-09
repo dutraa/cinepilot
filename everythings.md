@@ -46,14 +46,21 @@ Implemented on `feature/cinematic-tweak-engine`:
 - production-safe visualization foundation with decodeable source snapshots,
   provenance, renderer/profile contracts, quality metadata, bounded retries,
   and one-preview selection per visualization job;
+- provider-backed AI previsualization behind a default-off gate: one bounded
+  Google generation request per recommendation (Gemini Omni Flash through the
+  Interactions API, or Veo 3.1), untrusted-output validation, explicit duration
+  reconciliation, session-local media, per-preview media route, and full
+  provider/model/prompt/hash/retry provenance in the event ledger;
 - optional Grafana Loki telemetry;
 - tests and local synthetic/browser smoke verification.
 
 Still not implemented:
 
 - real creator baseline and held-out evidence run.
-- live video-generation provider, spatial reconstruction, visualization
-  persistence, and gallery/history.
+- live Google verification against a real key, the Issue 10.4 provider
+  scorecard, and place/temporal consistency gates beyond decodability,
+  codec playability, and duration.
+- spatial reconstruction, visualization persistence, and gallery/history.
 
 ## 4. Mock demo to build next
 
@@ -182,14 +189,24 @@ The browser is a view and command surface. It must not invent canonical state. G
 
 The story-aware slice adds the smallest useful API surface: story load/set, coverage snapshot, next-shot recommendation publication, and recommendation decision. See `docs/SPEC.md` for routes and tests.
 
-The deterministic Visualize slice adds session-local visualization jobs and
-three linked preview records through `POST /api/visualizations`, the matching
-GET job/list/source-frame routes, and the existing recommendation decision
-route. The browser animates fixed screen-space profiles over a server-frozen
-JPEG and shows source kind, snapshot dimensions, renderer version, and quality
-notes. The renderer boundary is provider-neutral, but the current implementation
-uses only the deterministic renderer; it never receives a flight plan or owns
-canonical state.
+The Visualize slice adds session-local visualization jobs and three linked
+preview records through `POST /api/visualizations`, the matching GET
+job/list/source-frame routes, a per-preview generated-media route, and the
+existing recommendation decision route.
+
+Two renderers share the provider-neutral `VisualizationRenderer` boundary.
+`DeterministicVisualizationRenderer` animates fixed screen-space profiles over a
+server-frozen JPEG for exactly 10 seconds; it is the default, the fallback, and
+the test double. `GoogleVideoRenderer` makes one bounded generation request per
+recommendation, conditioned on that frozen frame, and its output is untrusted
+until it passes MIME, size, container, codec-playability, decodability,
+dimension, frame-count, and duration validation. Google models deliver 4-, 6-,
+or 8-second clips, so a 10-second request is reconciled down and the difference
+is stated on the job, every preview, the ledger, and the dashboard; it is never
+relabeled. Generation is off unless the provider, the enable flag, and a key are
+all set, and deterministic output is never presented as Google output. Neither
+renderer receives a flight plan or owns canonical state, and neither runs inside
+an HTTP request path.
 
 ## 9. Evidence frame summary
 
@@ -204,8 +221,13 @@ The following claims require a comparator and measured baseline: better shots, f
 The deterministic Visualize slice supports only the narrower claim that CinePilot
 can render three clearly labeled, story-linked 10-second concept animations over
 a captured source frame and hand the selected concept to a manual capture
-workflow. It does not establish shot improvement, flight safety, spatial
-accuracy, or live provider quality.
+workflow.
+
+With generation enabled the claim is: CinePilot generates short, story-linked AI
+previsualizations for recommended shots and hands the selected concept to a
+manual capture workflow. Neither claim establishes shot improvement, flight
+safety, spatial accuracy, or live provider quality, and neither may be presented
+as live evidence or as proof that a recommendation was acted on.
 
 ## 10. Evaluation plan
 

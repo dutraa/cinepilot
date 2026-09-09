@@ -5,10 +5,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import shutil
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 from domain import ALLOWED_SHOT_IDS, ALLOWED_STATUSES, SHOT_DEFINITIONS
@@ -42,14 +45,17 @@ from schemas import (
     TweakStatus,
     VisualizationJob,
     VisualizationJobStatus,
+    VisualizationRenderKind,
     VisualizationRequestInput,
     VisualizationSourceKind,
 )
 from visualization import (
-    RENDERER_VERSION,
+    RenderContext,
+    VisualizationRenderer,
+    reconcile_duration,
+    select_renderer,
     validate_rendered_previews,
     validate_source_frame,
-    render_deterministic_previews,
 )
 
 
@@ -64,7 +70,11 @@ class InvalidDecisionError(ValueError):
 class AppState:
     """Canonical in-memory state for one local CinePilot run."""
 
-    def __init__(self, event_log: EventLog | None = None) -> None:
+    def __init__(
+        self,
+        event_log: EventLog | None = None,
+        visualization_renderer: VisualizationRenderer | None = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._version = 0
         self._intent_version = 0
@@ -94,6 +104,14 @@ class AppState:
         self._visualization_job_order: list[str] = []
         self._visualization_jobs_by_fingerprint: dict[str, str] = {}
         self._visualization_frames: dict[str, bytes] = {}
+        # Generated clips are session-local temporary artifacts, never
+        # persisted alongside the repository or the event log.
+        self._visualization_media_root = Path(
+            tempfile.mkdtemp(prefix="cinepilot-previsualization-")
+        )
+        self._visualization_renderer: VisualizationRenderer = (
+            visualization_renderer or select_renderer(settings)
+        )
         self._visualization_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="cinepilot-visualization"
         )
@@ -534,6 +552,8 @@ class AppState:
             self.take_recommendations = {}
             self.capture_records = {}
             self.evaluation_records = {}
+            for stale_job_id in list(self.visualization_jobs):
+                self._drop_visualization_media(stale_job_id)
             self.visualization_jobs = {}
             self._visualization_job_order = []
             self._visualization_jobs_by_fingerprint = {}
@@ -821,6 +841,7 @@ class AppState:
         provenance: str,
         source_kind: VisualizationSourceKind,
         source_label: str,
+        renderer_identity: dict[str, str],
     ) -> str:
         content = {
             "context": context,
@@ -829,8 +850,30 @@ class AppState:
             "provenance": provenance,
             "source_kind": source_kind.value,
             "source_label": source_label,
+            # A different renderer produces a materially different artifact, so
+            # it must never reuse another renderer's job.
+            "renderer": renderer_identity,
         }
         return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+    def _renderer_identity(self) -> dict[str, str]:
+        renderer = self._visualization_renderer
+        return {
+            "provider": getattr(renderer, "name", "unknown"),
+            "model": getattr(renderer, "model", "none"),
+            "prompt_version": getattr(renderer, "prompt_version", "none"),
+            "version": getattr(renderer, "version", "unknown"),
+            "render_kind": getattr(
+                renderer, "render_kind", VisualizationRenderKind.DETERMINISTIC_ANIMATION
+            ).value,
+        }
+
+    def _visualization_media_dir(self, job_id: str) -> Path:
+        return self._visualization_media_root / job_id
+
+    def _drop_visualization_media(self, job_id: str) -> None:
+        """Delete one job's temporary generated artifacts. Never raises."""
+        shutil.rmtree(self._visualization_media_dir(job_id), ignore_errors=True)
 
     def _visualization_recommendations_locked(self) -> list[ShotRecommendation]:
         """Return the three recommendations available to the visual-reference slice.
@@ -884,7 +927,11 @@ class AppState:
         source_kind: VisualizationSourceKind | str = VisualizationSourceKind.UNKNOWN,
         source_label: str | None = None,
     ) -> VisualizationJob:
-        """Create one asynchronous visualization job for this session."""
+        """Create one asynchronous previsualization job for this session.
+
+        The provider call happens on the single visualization worker, never in
+        the caller's request path.
+        """
         try:
             source_width, source_height = validate_source_frame(source_frame)
         except ValueError as exc:
@@ -894,6 +941,15 @@ class AppState:
         except ValueError as exc:
             raise InvalidDecisionError("visualization source kind is invalid") from exc
         normalized_source_label = source_label or normalized_source_kind.value
+        renderer = self._visualization_renderer
+        identity = self._renderer_identity()
+        try:
+            effective_duration, duration_note = reconcile_duration(
+                request.duration_seconds, getattr(renderer, "supported_durations", (10,))
+            )
+        except ValueError as exc:
+            raise InvalidDecisionError(str(exc)) from exc
+        source_sha256 = hashlib.sha256(source_frame).hexdigest()
         with self._lock:
             if self.story is None or self.active_beat_id is None:
                 raise InvalidDecisionError("current story observation is unavailable")
@@ -905,6 +961,7 @@ class AppState:
                 provenance,
                 normalized_source_kind,
                 normalized_source_label,
+                identity,
             )
             existing_id = self._visualization_jobs_by_fingerprint.get(fingerprint)
             if existing_id is not None:
@@ -915,21 +972,40 @@ class AppState:
                         raise InvalidDecisionError(
                             "three existing shot recommendations are required for visualization"
                         )
+                    self._drop_visualization_media(existing_id)
                     existing.status = VisualizationJobStatus.REQUESTED
                     existing.started_at = None
                     existing.completed_at = None
                     existing.error = None
+                    existing.retry_count += 1
                     existing.source_frame_available = True
-                    existing.source_frame_sha256 = hashlib.sha256(source_frame).hexdigest()
+                    existing.source_frame_sha256 = source_sha256
                     existing.source_kind = normalized_source_kind
                     existing.source_label = normalized_source_label
-                    existing.renderer_version = RENDERER_VERSION
+                    existing.render_kind = VisualizationRenderKind(identity["render_kind"])
+                    existing.provider = identity["provider"]
+                    existing.model = identity["model"]
+                    existing.prompt_version = identity["prompt_version"]
+                    existing.renderer_version = identity["version"]
+                    existing.requested_duration_seconds = request.duration_seconds
+                    existing.duration_seconds = effective_duration
+                    existing.duration_note = duration_note
                     existing.source_width = source_width
                     existing.source_height = source_height
                     existing.previews = []
                     self._visualization_frames[existing_id] = bytes(source_frame)
                     self._version += 1
-                    self._event_log.record("visualization_retry", job_id=existing_id)
+                    self._event_log.record(
+                        "visualization_retry",
+                        job_id=existing_id,
+                        retry_count=existing.retry_count,
+                        provider=existing.provider,
+                        model=existing.model,
+                        prompt_version=existing.prompt_version,
+                        source_frame_sha256=existing.source_frame_sha256,
+                        source_provenance=existing.provenance,
+                        duration_seconds=existing.duration_seconds,
+                    )
                     self._visualization_executor.submit(
                         self._render_visualization_job,
                         existing_id,
@@ -957,7 +1033,9 @@ class AppState:
             job = VisualizationJob(
                 job_id=job_id,
                 request_fingerprint=fingerprint,
-                duration_seconds=10,
+                duration_seconds=effective_duration,
+                requested_duration_seconds=request.duration_seconds,
+                duration_note=duration_note,
                 variation_count=3,
                 story_version=self._story_version,
                 beat_id=self.active_beat_id,
@@ -968,8 +1046,12 @@ class AppState:
                 provenance=provenance,
                 source_kind=normalized_source_kind,
                 source_label=normalized_source_label,
-                renderer_version=RENDERER_VERSION,
-                source_frame_sha256=hashlib.sha256(source_frame).hexdigest(),
+                render_kind=VisualizationRenderKind(identity["render_kind"]),
+                provider=identity["provider"],
+                model=identity["model"],
+                prompt_version=identity["prompt_version"],
+                renderer_version=identity["version"],
+                source_frame_sha256=source_sha256,
                 source_width=source_width,
                 source_height=source_height,
                 source_frame_available=True,
@@ -985,6 +1067,21 @@ class AppState:
                 observation_id=observation_id,
                 story_version=self._story_version,
                 beat_id=self.active_beat_id,
+                recommendation_ids=[item.recommendation_id for item in recommendations],
+                render_kind=job.render_kind.value,
+                provider=job.provider,
+                model=job.model,
+                prompt_version=job.prompt_version,
+                renderer_version=job.renderer_version,
+                source_frame_sha256=job.source_frame_sha256,
+                source_provenance=job.provenance,
+                source_kind=job.source_kind.value,
+                source_label=job.source_label,
+                requested_duration_seconds=job.requested_duration_seconds,
+                duration_seconds=job.duration_seconds,
+                duration_note=job.duration_note,
+                retry_count=job.retry_count,
+                requested_at=requested_at,
                 provenance=provenance,
             )
             self._visualization_executor.submit(
@@ -1008,13 +1105,31 @@ class AppState:
             job.status = VisualizationJobStatus.RENDERING
             job.started_at = self._now_iso()
             self._version += 1
-            self._event_log.record("visualization_rendering", job_id=job_id)
+            self._event_log.record(
+                "visualization_rendering",
+                job_id=job_id,
+                provider=job.provider,
+                model=job.model,
+            )
             job_copy = job.model_copy(deep=True)
+            source_frame = self._visualization_frames.get(job_id, b"")
+            story_title = self.story.title if self.story is not None else ""
+        media_dir = self._visualization_media_dir(job_id)
         try:
             previews = validate_rendered_previews(
-                job_id,
-                render_deterministic_previews(job_copy, request, recommendations),
+                job_copy,
+                self._visualization_renderer.render(
+                    RenderContext(
+                        job=job_copy,
+                        request=request,
+                        recommendations=tuple(recommendations),
+                        source_frame=source_frame,
+                        media_dir=media_dir,
+                        story_title=story_title,
+                    )
+                ),
                 recommendations,
+                media_dir=media_dir,
             )
         except Exception as exc:  # noqa: BLE001
             with self._lock:
@@ -1027,14 +1142,28 @@ class AppState:
                 job.source_frame_available = False
                 job.previews = []
                 self._visualization_frames.pop(job_id, None)
+                self._drop_visualization_media(job_id)
                 self._version += 1
                 self._event_log.record(
-                    "visualization_failed", job_id=job_id, reason=job.error
+                    "visualization_failed",
+                    job_id=job_id,
+                    reason=job.error,
+                    render_kind=job.render_kind.value,
+                    provider=job.provider,
+                    model=job.model,
+                    prompt_version=job.prompt_version,
+                    source_frame_sha256=job.source_frame_sha256,
+                    source_provenance=job.provenance,
+                    requested_at=job.requested_at,
+                    failed_at=job.completed_at,
+                    output_validation="failed",
+                    retry_count=job.retry_count,
                 )
             return
         with self._lock:
             job = self.visualization_jobs.get(job_id)
             if job is None:
+                self._drop_visualization_media(job_id)
                 return
             job.status = VisualizationJobStatus.READY
             job.completed_at = self._now_iso()
@@ -1044,6 +1173,25 @@ class AppState:
                 "visualization_ready",
                 job_id=job_id,
                 preview_ids=[preview.preview_id for preview in previews],
+                recommendation_ids=[preview.recommendation_id for preview in previews],
+                render_kind=job.render_kind.value,
+                provider=job.provider,
+                model=job.model,
+                prompt_version=job.prompt_version,
+                renderer_version=job.renderer_version,
+                source_frame_sha256=job.source_frame_sha256,
+                source_provenance=job.provenance,
+                source_kind=job.source_kind.value,
+                requested_at=job.requested_at,
+                ready_at=job.completed_at,
+                requested_duration_seconds=job.requested_duration_seconds,
+                duration_seconds=job.duration_seconds,
+                duration_note=job.duration_note,
+                output_validation="passed",
+                media_sha256=[
+                    preview.media.sha256 for preview in previews if preview.media is not None
+                ],
+                retry_count=job.retry_count,
                 provenance=job.provenance,
             )
             self._evict_visualizations_locked()
@@ -1053,6 +1201,7 @@ class AppState:
             evicted_id = self._visualization_job_order.pop(0)
             self.visualization_jobs.pop(evicted_id, None)
             self._visualization_frames.pop(evicted_id, None)
+            self._drop_visualization_media(evicted_id)
             for fingerprint, job_id in list(self._visualization_jobs_by_fingerprint.items()):
                 if job_id == evicted_id:
                     del self._visualization_jobs_by_fingerprint[fingerprint]
@@ -1066,6 +1215,25 @@ class AppState:
             if frame is None:
                 raise InvalidDecisionError("visualization source frame is unavailable")
             return bytes(frame)
+
+    def get_visualization_media(self, job_id: str, preview_id: str) -> tuple[bytes, str]:
+        """Return one validated generated clip and its browser-playable type."""
+        with self._lock:
+            job = self.visualization_jobs.get(job_id)
+            if job is None:
+                raise StateNotFoundError(f"visualization job not found: {job_id}")
+            preview = next(
+                (item for item in job.previews if item.preview_id == preview_id), None
+            )
+            if preview is None:
+                raise StateNotFoundError(f"visualization preview not found: {preview_id}")
+            if preview.media is None or not preview.media.available:
+                raise InvalidDecisionError("this preview has no generated media")
+            media_path = self._visualization_media_dir(job_id) / f"{preview.media.media_id}.bin"
+            mime_type = preview.media.mime_type.value
+        if not media_path.is_file():
+            raise InvalidDecisionError("visualization media is unavailable")
+        return media_path.read_bytes(), mime_type
 
     def _complete_recommendation_locked(self, recommendation: ShotRecommendation) -> None:
         beat_id = recommendation.beat_id
@@ -1345,3 +1513,8 @@ class AppState:
     def version(self) -> int:
         with self._lock:
             return self._version
+
+    def shutdown_visualizations(self) -> None:
+        """Stop the visualization worker and remove session-local artifacts."""
+        self._visualization_executor.shutdown(wait=False, cancel_futures=True)
+        shutil.rmtree(self._visualization_media_root, ignore_errors=True)
