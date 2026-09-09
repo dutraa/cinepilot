@@ -13,6 +13,8 @@ If the product fails, the team loses demo credibility and engineering time. The 
 No verified external scoreboard has been supplied. Until it is discovered, the following remain supporting metrics only:
 
 - critique latency;
+- previsualization generation latency;
+- valid generated previsualization rate;
 - valid structured critique rate;
 - duplicate critique rate;
 - creator decision time;
@@ -47,6 +49,10 @@ event-log record and source snapshot:
 - `prerecorded-file` — local fixture or held-out clips;
 - `live-rtmp` / `live-rtsp` / `live-webcam` — real observation streams;
 - `gemini` — model outputs (valid, invalid, and malformed attempts);
+- `deterministic-previsualization` — screen-space concept animations over a
+  frozen frame; no pixels generated;
+- `generated-previsualization` — provider-generated clips, recorded with
+  provider, model, prompt version, and the delivered clip duration;
 - creator actions (`actor="creator"`) — selections, dismissals, and manual completion marks.
 
 A run's claims may only cite the stratum it actually used. Live-drone
@@ -78,6 +84,25 @@ Run the same cases through:
 
 The clip set must be held out from prompt examples. Every eligible attempt, including malformed or failed model calls, remains in the denominator.
 
+## Previsualization evidence record
+
+Every previsualization attempt writes these fields to the append-only event
+ledger, so a run can be reconstructed without trusting the dashboard:
+
+visualization job ID, recommendation IDs, render kind, provider, model, prompt
+version, renderer version, source-frame SHA-256, source provenance, source kind
+and label, requested timestamp, ready or failed timestamp, requested duration,
+delivered duration and reconciliation note, output validation result, generated
+media SHA-256 values, retry count, and — through the existing
+`recommendation_decision` event — the creator's selection.
+
+Failed and malformed attempts stay in the denominator: a provider timeout, a
+malformed response, an invalid MIME type, undecodable or oversized media, and a
+wrong recommendation linkage each write a `visualization_failed` record with its
+reason, and a retry increments `retry_count` on the same job rather than
+starting a fresh, flattering denominator. API keys and raw media never enter the
+ledger.
+
 ## Eval integrity contract
 
 - Evaluation clips and prompt examples are stored in separate manifests.
@@ -92,6 +117,32 @@ The clip set must be held out from prompt examples. Every eligible attempt, incl
 The deterministic Visualize slice can support only: “CinePilot renders three
 clearly labeled, story-linked 10-second concept animations over a captured
 source frame and hands the selected concept to a manual capture workflow.”
+
+With provider-backed generation enabled, the implementation may support only:
+
+> CinePilot generates short, story-linked AI previsualizations for recommended
+> shots and hands the selected concept to a manual capture workflow.
+
+Every constraint on that sentence is load-bearing. “Short” is the delivered
+clip length, not the requested one: the current Google models emit 4-, 6-, or
+8-second clips, so a 10-second request produces 8-second previews and is
+labeled as such everywhere. “Story-linked” means the prompt was assembled from
+an existing recommendation's story purpose, visual objective, why-now, manual
+execution guidance, and safety notes. “Hands the selected concept to a manual
+capture workflow” is the end of the claim: selection opens the manual capture
+brief and nothing else.
+
+A generated previsualization is not, and may never be presented as:
+
+- live evidence or observed current footage;
+- guaranteed camera movement;
+- drone-flight guidance, a route, or waypoints;
+- proof that the shot is safe to fly;
+- proof that production quality improved;
+- proof that the recommendation was acted on or the shot captured.
+
+The implementation cannot claim improved production outcomes without the
+existing manual comparator and independent review scheduled below.
 
 After the scheduled baseline and independent review, the evidence may support a
 stronger pilot recommendation if the measured result warrants it.

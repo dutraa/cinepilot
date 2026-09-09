@@ -467,6 +467,22 @@ async def get_visualization_source_frame(job_id: str) -> Response:
     return Response(content=frame, media_type="image/jpeg")
 
 
+@app.get("/api/visualizations/{job_id}/previews/{preview_id}/media")
+async def get_visualization_media(job_id: str, preview_id: str) -> Response:
+    """Serve one validated generated clip.
+
+    The source-frame route cannot serve this: a generated preview is a separate
+    per-preview video artifact, not the shared frozen JPEG.
+    """
+    try:
+        media, mime_type = app_state.get_visualization_media(job_id, preview_id)
+    except StateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidDecisionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(content=media, media_type=mime_type)
+
+
 @app.post("/api/recommendations")
 async def publish_recommendations(payload: ShotRecommendationBatchInput) -> JSONResponse:
     snapshot = app_state.snapshot()

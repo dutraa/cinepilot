@@ -114,34 +114,51 @@ mark a beat covered or prove production quality improved.
 
 The Visual Reference tab adds strict `VisualizationRequestInput`,
 `VisualizationJobStatus`, `VisualizationQualityStatus`,
-`VisualizationSourceKind`, `AnimationProfile`, `AnimationProfileSpec`,
-`VisualizationPreview`, and `VisualizationJob` contracts. A single in-process
-worker captures one decodeable, session-local observation snapshot and produces
-exactly three browser-playable 10-second animations over that JPEG. The
-deterministic renderer implements the provider-neutral `VisualizationRenderer`
-boundary; provider output must pass the same validation before it can become
-ready state. The server owns every job, observation hash, preview, timestamp,
-status, recommendation link, version, source label, and provenance. The preview
-attaches to an existing recommendation; it does not introduce a second
-decision state machine.
+`VisualizationSourceKind`, `VisualizationRenderKind`,
+`VisualizationMediaMimeType`, `AnimationProfile`, `AnimationProfileSpec`,
+`GeneratedMediaRef`, `VisualizationPreview`, and `VisualizationJob` contracts. A
+single in-process worker captures one decodeable, session-local observation
+snapshot and produces exactly three browser-playable previsualizations for the
+three existing shot recommendations.
+
+Two renderers implement the same provider-neutral `VisualizationRenderer`
+boundary in `visualization.py`:
+
+- `DeterministicVisualizationRenderer` — exactly three 10-second screen-space
+  animations over the frozen JPEG. It invents no pixels, requires no
+  credentials, and is both the fallback and the test double.
+- `GoogleVideoRenderer` (`google_video.py`) — one bounded generation request
+  per recommendation, conditioned on the frozen frame. `gemini-omni-1.1-flash`
+  through the Interactions API is the default backend because it takes text
+  plus a source image in one multimodal request; Veo 3.1 through
+  `models.generate_videos` is the configurable alternative.
+
+Provider output is untrusted and must pass the same preview validation, plus
+media validation (MIME type, existence, size ceiling, container magic,
+decodability, dimensions, frame count, playable duration), before it can become
+ready state. Generated clips are session-local temporary files, deleted on
+failure, retry, story reset, job eviction, and shutdown.
+
+Renderer selection requires `VISUALIZATION_PROVIDER=google`,
+`ENABLE_GENERATED_PREVISUALIZATION=true`, and a configured key. Without all
+three the deterministic renderer runs and is labeled as deterministic;
+deterministic output is never presented as Google output.
+
+The server owns every job, observation hash, preview, timestamp, status,
+recommendation link, version, source label, provenance, provider, model, prompt
+version, retry count, delivered duration, and duration reconciliation note. A
+provider clip of 4, 6, or 8 seconds is never relabeled as the requested 10. The
+preview attaches to an existing recommendation; it does not introduce a second
+decision state machine, and no generation call runs inside an HTTP request path.
 
 The tab is secondary to the Live Coverage Desk. It is opened explicitly by the
 creator, remains unavailable until a current story context and three
 recommendations exist, and presents the three concepts as illustrative
-screen-space references over the frozen source frame. It never displaces the
-between-takes coverage decision or presents a concept as live evidence.
-
-The tab is secondary to the Live Coverage Desk. It is opened explicitly by the
-creator, remains unavailable until a current story context and three
-recommendations exist, and presents the three concepts as illustrative
-screen-space references over the frozen source frame. It never displaces the
-between-takes coverage decision or presents a concept as live evidence.
-
-The tab is secondary to the Live Coverage Desk. It is opened explicitly by the
-creator, remains unavailable until a current story context and three
-recommendations exist, and presents the three concepts as illustrative
-screen-space references over the frozen source frame. It never displaces the
-between-takes coverage decision or presents a concept as live evidence.
+previsualization references for the frozen source observation. It never
+displaces the between-takes coverage decision or presents a concept as live
+evidence. The UI keeps observed current footage, the recommended shot, the AI
+previsualization, the selected recommendation, and the acted/captured shot
+visually distinct.
 
 ## Failure behavior
 
@@ -157,7 +174,9 @@ between-takes coverage decision or presents a concept as live evidence.
 - Event-log failure: log the failure but keep the live director running.
 - Real source failure: report `disconnected`/`reconnecting`, drop the stale frame, stop feeding Gemini, retry with backoff. Synthetic fallback only on explicit opt-in, and always labeled `fallback` / `synthetic-fallback`.
 - Stale frames: never sent to Gemini as current observations (`frames_skipped_stale` counts them) and never rendered as the current monitor view.
-- Visualization renderer failure: mark only the job failed, remove its temporary source frame, and leave story, recommendation, and coverage state unchanged; a retry reuses the failed job ID and is still bounded by the one-worker rule.
+- Visualization renderer failure: mark only the job failed, remove its temporary source frame and any generated media, and leave story, recommendation, coverage, creator decisions, and the live director loop unchanged; a retry reuses the failed job ID, increments `retry_count`, and is still bounded by the one-worker rule.
+- Provider timeout, malformed response, invalid MIME type, undecodable media, oversized media, or wrong recommendation linkage: all terminate as the same job-local failure with an actionable, safe-text reason.
+- Missing Google credentials: the application continues on the deterministic renderer with `provider: deterministic`; it never claims Google provenance for deterministic output.
 - Visualization selection: reuse recommendation transitions; selection exposes a manual capture brief but never marks capture, coverage, or quality improvement.
 - Analysis duplicate: a second request while a job is requested, capturing, or analyzing returns `409`; failed jobs can be retried with a new explicit request.
 - Analysis cancellation and provider timeout: mark only the job terminal, delete transient raw frames, preserve the rest of canonical state, and re-enable retry.

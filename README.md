@@ -76,9 +76,15 @@ flowchart LR
    auditable transitions. A new evidence burst is required for evaluation.
 5. Every analysis attempt, observation, recommendation, creator decision,
    capture, and evaluation is recorded in the append-only local event log.
-6. The optional **Visual Reference** workspace renders three deterministic,
-   illustrative 10-second concepts from a frozen source frame. These previews
-   are not live evidence, spatial reconstruction, or flight instructions.
+6. The optional **Visual Reference** workspace produces three illustrative AI
+   previsualizations for the three existing recommendations, from a frozen
+   source frame. With no Google video key configured it renders three
+   deterministic 10-second screen-space concepts; with generation explicitly
+   enabled it requests one short generated clip per recommendation. Both are
+   labeled "AI previsualization — illustrative creative reference, not flight
+   truth." Neither is live evidence, guaranteed camera movement, spatial
+   reconstruction, flight instruction, proof that the shot is safe, proof that
+   production quality improved, or proof that the recommendation was acted on.
 
 ## Dashboard tour
 
@@ -86,8 +92,10 @@ flowchart LR
 - **Coverage Desk** — story context, active beat, source truth, explicit analysis,
   observed evidence, missing coverage, ranked recommendations, creator decision,
   capture, follow-up evaluation, and coverage history.
-- **Visual Reference** — three bounded illustrative concepts derived from the
-  current frozen source frame and recommendations.
+- **Visual Reference** — three bounded illustrative previsualizations derived
+  from the current frozen source frame and the three existing recommendations,
+  each showing its render kind, provider, model, prompt version, true duration,
+  source provenance, and output-validation result.
 - **System details** — secondary source, provider, event-stream, raw-media,
   Grafana, and legacy compatibility diagnostics.
 
@@ -98,11 +106,37 @@ live Gemini behavior.
 
 The story-first dashboard also includes an advisory Visual Reference tab. With a
 synthetic, prerecorded, webcam, RTSP, or RTMP source, the creator can freeze the
-latest source frame and request exactly three fixed 10-second concept
-animations. The response shows source provenance, snapshot dimensions,
-renderer version, and render-quality notes. The concepts are illustrative 2D
-references, not selectable coverage decisions, flight truth, obstacle maps,
-spatial reconstruction, or evidence that the captured shot improved.
+latest source frame and request exactly three previsualization concepts. The
+response shows render kind, provider, model, prompt version, source provenance,
+snapshot dimensions, renderer version, the true clip duration, and
+output-validation notes.
+
+Duration is reconciled, never relabeled. The deterministic renderer delivers
+exactly 10 seconds. Current Google video models deliver 4-, 6-, or 8-second
+clips, so a 10-second request against a Google renderer produces 8-second
+previews and the job, every preview, the event ledger, and the dashboard all
+say 8 seconds and state that it is not 10.
+
+Provider-backed generation is off by default. It requires
+`VISUALIZATION_PROVIDER=google`, `ENABLE_GENERATED_PREVISUALIZATION=true`, and a
+key in `GOOGLE_VIDEO_API_KEY` (falling back to `GEMINI_API_KEY`). Without all
+three, CinePilot keeps the deterministic renderer and labels it
+`provider: deterministic`; deterministic output is never presented as Google
+output. `GOOGLE_VIDEO_BACKEND=interactions` uses Gemini Omni Flash
+(`gemini-omni-1.1-flash`) through the Interactions API; `veo` uses Veo 3.1
+through `models.generate_videos`. Generated clips are session-local temporary
+files, validated for MIME type, size, container, codec playability,
+decodability, dimensions, and duration before a job can become ready, and
+deleted on failure, retry, story reset, eviction, and shutdown. A provider
+failure marks only the visualization job failed and can be retried; story
+state, recommendations, creator decisions, and the live director loop are
+untouched.
+
+The concepts are illustrative references, not selectable coverage decisions,
+flight truth, obstacle maps, spatial reconstruction, or evidence that the
+captured shot improved. Selecting a preview reuses the existing
+recommendation-selection flow and exposes the manual capture brief; it never
+marks a shot captured or completed.
 
 ## Quick Start
 
@@ -248,10 +282,11 @@ Leave the three `GRAFANA_*` values empty to run telemetry in **Dry Run** mode �
 | `GET /api/recommendations` | Return latest recommendations and history. |
 | `POST /api/recommendations` | Publish a validated manual recommendation batch. |
 | `POST /api/recommendations/{id}/decision` | Select, complete, or dismiss a recommendation. |
-| `POST /api/visualizations` | Request exactly three deterministic 10-second concepts for the current story context and frozen source observation. |
+| `POST /api/visualizations` | Request exactly three previsualization concepts for the current story context and frozen source observation. Accepts `duration_seconds` of 4, 6, 8, or 10; the job reports what was actually delivered. |
 | `GET /api/visualizations` | List bounded session-local visualization jobs. |
 | `GET /api/visualizations/{job_id}` | Return one visualization job and its linked previews. |
 | `GET /api/visualizations/{job_id}/source-frame` | Return the server-frozen JPEG for browser animation while the bounded session job is retained. |
+| `GET /api/visualizations/{job_id}/previews/{preview_id}/media` | Return one validated generated clip. `409` when the preview has no generated media (every deterministic preview). |
 | `GET /health` | JSON system status: full source snapshot (status, provenance, frame age, FPS, reconnects, redacted URL), Gemini/Grafana status, frame counters. |
 
 ## Project Structure
@@ -273,6 +308,8 @@ cinepilot/
 ├── config.py             # pydantic-settings configuration
 ├── story_demo.py          # Strict seeded story fixture loader
 ├── demo_provider.py       # Explicit deterministic recommendation provider
+├── visualization.py       # Provider-neutral renderer contract, media validation, deterministic renderer
+├── google_video.py        # Google-backed previsualization renderer (Gemini Omni Flash / Veo 3.1)
 ├── templates/
 │   └── index.html        # Dark-mode Director's Monitor dashboard
 ├── AGENTS.md             # Operating contract for coding agents

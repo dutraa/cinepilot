@@ -25,6 +25,30 @@ class Settings(BaseSettings):
     ENABLE_CONTINUOUS_LIVE: bool = False
     ANALYSIS_TIMEOUT_SEC: float = 30.0
 
+    # --- Visual previsualization renderer ---
+    # The deterministic screen-space renderer is the default and the test
+    # double. "google" enables provider-backed AI previsualization; it stays
+    # off unless a key is configured, and it never fabricates Google
+    # provenance for deterministic output.
+    VISUALIZATION_PROVIDER: str = "deterministic"
+    ENABLE_GENERATED_PREVISUALIZATION: bool = False
+    # Falls back to GEMINI_API_KEY when empty.
+    GOOGLE_VIDEO_API_KEY: str = ""
+    # Gemini Omni Flash is the first candidate because it accepts a source
+    # frame plus text and returns one short video through the Interactions
+    # API. Veo 3.1 remains a configurable alternative for image-to-video.
+    GOOGLE_VIDEO_BACKEND: str = "interactions"
+    GOOGLE_VIDEO_MODEL: str = "gemini-omni-1.1-flash"
+    GOOGLE_VIDEO_TIMEOUT_SEC: float = 180.0
+    GOOGLE_VIDEO_POLL_INTERVAL_SEC: float = 3.0
+    # Hard ceiling for one generated clip; larger responses are rejected.
+    GOOGLE_VIDEO_MAX_BYTES: int = 33554432
+    # Providers currently emit 4, 6, or 8 second clips. The requested 10-second
+    # deterministic duration is never relabeled onto a shorter generated clip.
+    GOOGLE_VIDEO_DURATION_SEC: int = 8
+    GOOGLE_VIDEO_RESOLUTION: str = "720p"
+    GOOGLE_VIDEO_ASPECT_RATIO: str = "16:9"
+
     # --- Video ingest ---
     RTMP_URL: str = "rtmp://127.0.0.1:1935/live/drone"
     RTSP_URL: str = ""

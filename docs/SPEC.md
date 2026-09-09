@@ -147,38 +147,92 @@ beat. The primary live path uses `recommended -> selected -> acted`, with the
 creator capture record and follow-up evaluation separate from coverage
 completion.
 
-## Visualization contracts and API
+## Previsualization contracts and API
 
-The Visualize slice accepts only the exact body
-`{"duration_seconds": 10, "variation_count": 3}`. The server decodes and
-freezes the latest available frame, or the seeded synthetic scene when
+The previsualization slice accepts only
+`{"duration_seconds": <4|6|8|10>, "variation_count": 3}`. The server decodes
+and freezes the latest available frame, or the seeded synthetic scene when
 deterministic demo mode has no live frame, and creates one session-local job
 with status `requested -> rendering -> ready|failed`. A repeated fingerprint
 returns the existing job; an invalid observation or a different observation
-while a job is active returns `409`.
+while a job is active returns `409`. The fingerprint includes the active
+renderer identity, so switching provider or model never reuses another
+renderer's artifacts.
 
 Each ready job contains exactly three previews linked one-to-one with existing
-`ShotRecommendation` records. The fixed profiles are `descending_reveal`,
-`lateral_parallax`, and `restrained_pull_away`. They are browser animations over
-the frozen JPEG, not executable camera or flight instructions. Each response
-also exposes the server-owned source kind, label, dimensions, SHA-256 snapshot
-hash, renderer version, profile specification, and render quality status. A
-quality pass means the preview contract is valid; it does not mean spatial
-accuracy or obstacle awareness. The existing recommendation decision route is
-the only selection lifecycle; at most one preview in a job may be selected at
-once. Selecting a preview exposes the manual brief but does not complete
-coverage or prove that a resulting shot improved.
+`ShotRecommendation` records. The fixed concept profiles remain
+`descending_reveal`, `lateral_parallax`, and `restrained_pull_away`. A preview
+is one of two render kinds, and the two are never conflated:
 
-The routes are `POST /api/visualizations`, `GET /api/visualizations`,
-`GET /api/visualizations/{job_id}`, and
-`GET /api/visualizations/{job_id}/source-frame`. Visualization jobs and linked
-preview statuses are included in `/api/state` and `/events`. Unknown fields,
-client-owned IDs/statuses/timestamps/assets, invalid payloads, unknown jobs, and
-conflicting observations are rejected at the API boundary with `422`, `404`,
-or `409` as appropriate. A failed job may be retried with the same request and
-job fingerprint; the server reuses the job ID and clears the failed attempt
-before rendering again. The deterministic renderer is behind a provider-neutral
-renderer interface; no live video-generation provider is enabled by default.
+- `deterministic_animation` — a browser animation over the frozen JPEG, exactly
+  10 seconds, with a server-fixed `profile_spec` and no generated media. It
+  invents no pixels and needs no credentials.
+- `generated_video` — a provider-generated clip, served as its own media
+  artifact, with no `profile_spec`. The profile name only labels the intended
+  visual concept.
+
+Neither kind is executable camera or flight instruction.
+
+### Duration reconciliation
+
+`duration_seconds` on the request is what the creator *asks for*. The job
+carries both `requested_duration_seconds` and the delivered `duration_seconds`,
+plus a plain-text `duration_note` whenever they differ. The deterministic
+renderer delivers exactly 10 seconds. Current Google video models deliver 4-,
+6-, or 8-second clips (`GOOGLE_VIDEO_DURATION_SEC`, default 8). A 10-second
+request against a Google renderer therefore produces 8-second previews, and
+every preview, the job, the event ledger, and the dashboard all report 8
+seconds with the note stating it is not 10. A shorter clip is never relabeled.
+
+### Untrusted provider output
+
+Provider media is untrusted until the server has written it to a session-local
+temporary file and validated: response structure, declared MIME type against
+the browser-playable set (`video/mp4`, `video/webm`), file existence, maximum
+file size (`GOOGLE_VIDEO_MAX_BYTES`), container magic bytes, decodability,
+dimensions, frame count, and playable duration within tolerance. Renderer
+output is then validated as a set: exactly three unique previews, one-to-one
+recommendation linkage, fixed profiles, job linkage, retained source frame,
+matching render kind, honest duration, consistent provider/model provenance,
+matching source-frame hash, and, for generated clips, that the referenced media
+file still exists. Anything that fails marks only the job failed.
+
+### Routes
+
+`POST /api/visualizations`, `GET /api/visualizations`,
+`GET /api/visualizations/{job_id}`,
+`GET /api/visualizations/{job_id}/source-frame`, and
+`GET /api/visualizations/{job_id}/previews/{preview_id}/media`. The last route
+is new: a generated preview is a separate per-preview video artifact, which the
+shared frozen-JPEG route cannot serve. It returns `404` for an unknown job or
+preview and `409` when a preview has no generated media (every deterministic
+preview, and any preview whose artifact has been dropped).
+
+Visualization jobs and linked preview statuses are included in `/api/state` and
+`/events`. Unknown fields, client-owned IDs/statuses/timestamps/assets, invalid
+payloads, unknown jobs, and conflicting observations are rejected at the API
+boundary with `422`, `404`, or `409` as appropriate. A failed job may be retried
+with the same request and job fingerprint; the server reuses the job ID,
+increments `retry_count`, drops the failed attempt's media, and renders again.
+
+The provider call never happens inside an HTTP request path. One in-process
+worker with `max_workers=1` owns every render, so the request path returns
+`requested` while generation is still running.
+
+### Renderer selection
+
+The deterministic renderer is the default and the test double. The Google
+renderer is used only when `VISUALIZATION_PROVIDER=google` **and**
+`ENABLE_GENERATED_PREVISUALIZATION=true` **and** a key is configured
+(`GOOGLE_VIDEO_API_KEY`, falling back to `GEMINI_API_KEY`). Otherwise the
+application continues on the deterministic renderer and labels it
+`provider: deterministic`, `model: none`. Deterministic output is never
+presented as Google output. No test requires a live key.
+
+The existing recommendation decision route is the only selection lifecycle; at
+most one preview in a job may be selected at once. Selecting a preview exposes
+the manual capture brief but does not complete coverage, mark the shot
+captured, or prove that a resulting shot improved.
 
 ## Story-aware API
 
@@ -195,6 +249,16 @@ story, coverage, recommendation, and provenance fields.
 | --- | --- | --- |
 | `GEMINI_API_KEY` | empty | Enables live Gemini reasoning |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Bounded Gemini model |
+| `VISUALIZATION_PROVIDER` | `deterministic` | `deterministic` or `google` |
+| `ENABLE_GENERATED_PREVISUALIZATION` | `false` | Explicit opt-in for provider-backed previsualization |
+| `GOOGLE_VIDEO_API_KEY` | empty | Falls back to `GEMINI_API_KEY` |
+| `GOOGLE_VIDEO_BACKEND` | `interactions` | `interactions` (Gemini Omni Flash) or `veo` (Veo 3.1) |
+| `GOOGLE_VIDEO_MODEL` | `gemini-omni-1.1-flash` | Generation model |
+| `GOOGLE_VIDEO_TIMEOUT_SEC` | `180.0` | Maximum time for one generation request |
+| `GOOGLE_VIDEO_MAX_BYTES` | `33554432` | Hard ceiling for one generated clip |
+| `GOOGLE_VIDEO_DURATION_SEC` | `8` | Provider clip length; reconciled, never relabeled |
+| `GOOGLE_VIDEO_RESOLUTION` | `720p` | Requested output resolution |
+| `GOOGLE_VIDEO_ASPECT_RATIO` | `16:9` | Requested output aspect ratio |
 | `ENABLE_CONTINUOUS_LIVE` | `false` | Explicit opt-in for legacy continuous Gemini Live |
 | `ANALYSIS_TIMEOUT_SEC` | `30.0` | Maximum time for one bounded provider request |
 | `RTMP_URL` | local RTMP URL | Default RTMP/RTSP input |
@@ -216,4 +280,6 @@ story, coverage, recommendation, and provenance fields.
 - Event-log failures are logged but do not stop the live loop.
 - Missing Gemini credentials leave the shell usable and report a visible disconnected state.
 - No safety-critical flight advice is presented as an automated command or guarantee.
-- The Visual Reference tab is secondary to Coverage Desk. Visualize concepts are labeled `AI visualization — illustrative creative reference, not flight truth.` and retain deterministic/live-source provenance separately. The tab is enabled only when the current context, fresh source, consent, and three recommendations are available.
+- The Visual Reference tab is secondary to Coverage Desk. Previsualization concepts are labeled `AI previsualization — illustrative creative reference, not flight truth.` and retain deterministic, generated, and live-source provenance separately. The tab is enabled only when the current context, fresh source, consent, and three recommendations are available.
+- A provider failure — timeout, malformed response, invalid MIME type, undecodable or oversized media, wrong recommendation linkage — marks only the visualization job failed. Story state, recommendations, creator decisions, and the live director loop are untouched, and the job can be retried.
+- API keys and raw generated media never reach the log or the event ledger.

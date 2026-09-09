@@ -208,6 +208,7 @@ async def run_app(args: argparse.Namespace) -> None:
             agent_task, server_task, stop_task, return_exceptions=True
         )
         video_manager.stop()
+        server.app_state.shutdown_visualizations()
         grafana.close()
         logger.info("CinePilot shut down cleanly. That's a wrap.")
 
