@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from schemas import ShotRecommendationInput, ShotRecommendation
+from schemas import CinematicIntent, ShotRecommendationInput, ShotRecommendation
 from state import AppState
 from story_demo import load_initial_shot, load_story_fixture
 
@@ -132,6 +132,16 @@ class DeterministicDemoProvider:
             initial_coverage=coverage,
             current_shot_contribution=contribution,
             provenance=DEMO_PROVENANCE,
+        )
+        app_state.set_intent(
+            CinematicIntent(
+                shot_name="High establishing wide",
+                creative_goal="Establish the lodge's isolation and vulnerability.",
+                subject="The remote mountain lodge",
+                desired_feel="Isolated and restrained",
+                camera_move="Static high wide",
+                constraints=["Manual advisory guidance only."],
+            )
         )
         return self.publish_current(app_state)
 

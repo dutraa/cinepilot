@@ -71,3 +71,15 @@ def test_dashboard_exposes_visual_reference_as_a_secondary_tab() -> None:
     assert "Illustrative only" in html
     assert "function requestVisualization" in html
     assert '"/api/visualizations"' in html
+
+
+def test_hidden_tab_panel_cannot_be_overridden_by_panel_layout() -> None:
+    html = Path(__file__).parents[1].joinpath("templates", "index.html").read_text(encoding="utf-8")
+
+    assert "[hidden] { display:none !important; }" in html
+
+
+def test_dashboard_uses_an_inline_favicon_without_a_missing_asset_request() -> None:
+    html = Path(__file__).parents[1].joinpath("templates", "index.html").read_text(encoding="utf-8")
+
+    assert '<link rel="icon" href="data:," />' in html

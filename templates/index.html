@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:," />
 <title>CinePilot — Live Coverage Desk</title>
 <style>
   :root { --bg:#0b0d12; --panel:#12161f; --edge:#252d3d; --text:#e8ecf4; --dim:#919bae; --accent:#61c8f7; --green:#53d88a; --yellow:#f3c969; --red:#f07878; }
@@ -22,6 +23,7 @@
   .tab { background:transparent; color:var(--dim); border:1px solid transparent; border-bottom:0; border-radius:8px 8px 0 0; }
   .tab[aria-selected="true"] { color:var(--text); background:var(--panel); border-color:var(--edge); }
   .tab-panel { display:grid; gap:18px; }
+  [hidden] { display:none !important; }
   .visualization-intro { display:flex; justify-content:space-between; align-items:start; gap:18px; }
   .visualization-intro p { color:var(--dim); max-width:78ch; margin-top:6px; }
   .visualization-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }

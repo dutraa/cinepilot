@@ -1483,6 +1483,18 @@ production quality, fewer retakes, safer flight, faster decisions, or
 cinematographer replacement. Those claims require the evidence frame,
 denominators, a manual comparator, held-out cases, and independent review.
 
+Provider-boundary correction (2026-09-09): the bounded Gemini analysis and
+follow-up evaluation requests now send their strict Pydantic response schemas
+to Gemini, rather than requesting unconstrained JSON and validating only after
+receipt. Server-side validation remains mandatory, and malformed or failed
+attempts remain failures in the evidence denominator.
+
+Synthetic release verification also established two demo-readiness contracts:
+explicit deterministic demo mode seeds the initial shot intent required by the
+analysis gate, and selecting a workspace tab hides the inactive panel even
+when its layout class declares a display mode. Both behaviors have regression
+coverage and were exercised through the running synthetic dashboard.
+
 The Visual Reference slice is now exposed as an explicit secondary tab rather
 than a disabled control in the system-status disclosure. It consumes the same
 bounded current source frame and can adapt the primary take recommendations at

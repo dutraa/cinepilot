@@ -181,7 +181,10 @@ async def gemini_analysis(images: list[bytes], context: dict[str, Any]) -> TakeA
         response = await client.aio.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=parts,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=TakeAnalysisResult,
+            ),
         )
         text = getattr(response, "text", None)
         if not text:
@@ -204,7 +207,10 @@ async def gemini_evaluation(images: list[bytes], context: dict[str, Any]) -> Tak
         response = await client.aio.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=parts,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=TakeEvaluationInput,
+            ),
         )
         text = getattr(response, "text", None)
         if not text:

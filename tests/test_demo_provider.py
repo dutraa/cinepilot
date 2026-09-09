@@ -14,6 +14,14 @@ def test_demo_provider_seeds_repeatable_recommendations_and_advances(tmp_path) -
     assert [item.recommendation_id for item in first] == [item.recommendation_id for item in repeated]
     assert all(item.provenance == "deterministic_demo" for item in first)
     assert {item.beat_id for item in first} == {"discovery", "invitation", "confidence"}
+    assert state.snapshot()["intent"] == {
+        "shot_name": "High establishing wide",
+        "creative_goal": "Establish the lodge's isolation and vulnerability.",
+        "subject": "The remote mountain lodge",
+        "desired_feel": "Isolated and restrained",
+        "camera_move": "Static high wide",
+        "constraints": ["Manual advisory guidance only."],
+    }
 
     second_state = AppState(EventLog(str(tmp_path / "second-events.jsonl")))
     second = DeterministicDemoProvider().seed(second_state)
